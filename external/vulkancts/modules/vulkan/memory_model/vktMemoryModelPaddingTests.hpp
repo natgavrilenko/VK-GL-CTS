@@ -1,11 +1,11 @@
-#ifndef _VKTMEMORYMODELSHAREDLAYOUT_HPP
-#define _VKTMEMORYMODELSHAREDLAYOUT_HPP
+#ifndef _VKTMEMORYMODELPADDINGTESTS_HPP
+#define _VKTMEMORYMODELPADDINGTESTS_HPP
 /*------------------------------------------------------------------------
  * Vulkan Conformance Tests
  * ------------------------
  *
- * Copyright (c) 2021 The Khronos Group Inc.
- * Copyright (c) 2021 Google LLC.
+ * Copyright (c) 2019 The Khronos Group Inc.
+ * Copyright (c) 2019 Valve Corporation.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +21,10 @@
  *
  *//*!
  * \file
- * \brief Shared memory layout tests.
+ * \brief Vulkan Memory Model padding access tests.
  *//*--------------------------------------------------------------------*/
 
+#include "tcuDefs.hpp"
 #include "tcuTestCase.hpp"
 
 namespace vkt
@@ -31,9 +32,9 @@ namespace vkt
 namespace MemoryModel
 {
 
-tcu::TestCaseGroup *createSharedMemoryLayoutTests(tcu::TestContext &testCtx);
+tcu::TestCaseGroup *createPaddingTests(tcu::TestContext &testCtx);
 
 } // namespace MemoryModel
 } // namespace vkt
 
-#endif // _VKTMEMORYMODELSHAREDLAYOUT_HPP
+#endif // _VKTMEMORYMODELPADDINGTESTS_HPP

@@ -1,3 +1,6 @@
+dEQP-VK.memory_model.amber.permuted_index.barrier
+dEQP-VK.memory_model.amber.permuted_index.release_acquire
+dEQP-VK.memory_model.amber.permuted_index.release_acquire_atomic_payload
 dEQP-VK.memory_model.message_passing.core11.u32.coherent.control_and_memory_barrier.atomicwrite.subgroup.payload_local.buffer.guard_nonlocal.buffer.comp
 dEQP-VK.memory_model.message_passing.core11.u32.coherent.control_and_memory_barrier.atomicwrite.subgroup.payload_local.image.guard_nonlocal.buffer.comp
 dEQP-VK.memory_model.message_passing.core11.u32.coherent.control_and_memory_barrier.atomicwrite.subgroup.payload_nonlocal.buffer.guard_nonlocal.buffer.comp
@@ -8868,9 +8871,6 @@ dEQP-VK.memory_model.message_passing.ext.u64.noncoherent.atomic_atomic.atomicwri
 dEQP-VK.memory_model.message_passing.ext.u64.noncoherent.atomic_atomic.atomicwrite.workgroup.payload_nonlocal.workgroup.guard_nonlocal.image.comp
 dEQP-VK.memory_model.message_passing.ext.u64.noncoherent.atomic_atomic.atomicwrite.workgroup.payload_nonlocal.workgroup.guard_nonlocal.physbuffer.comp
 dEQP-VK.memory_model.message_passing.ext.u64.noncoherent.atomic_atomic.atomicwrite.workgroup.payload_nonlocal.workgroup.guard_nonlocal.workgroup.comp
-dEQP-VK.memory_model.message_passing.permuted_index.barrier
-dEQP-VK.memory_model.message_passing.permuted_index.release_acquire
-dEQP-VK.memory_model.message_passing.permuted_index.release_acquire_atomic_payload
 dEQP-VK.memory_model.padding.test
 dEQP-VK.memory_model.shared.16bit.arrays_of_arrays.0
 dEQP-VK.memory_model.shared.16bit.arrays_of_arrays.1

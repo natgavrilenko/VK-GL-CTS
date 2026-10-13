@@ -4,6 +4,7 @@
  *
  * Copyright (c) 2017-2019 The Khronos Group Inc.
  * Copyright (c) 2018-2019 NVIDIA Corporation
+ * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,13 +20,10 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model tests
+ * \brief Vulkan Memory Model tests.
  *//*--------------------------------------------------------------------*/
 
-#include "vktMemoryModelTests.hpp"
-#include "vktMemoryModelPadding.hpp"
-#include "vktMemoryModelSharedLayout.hpp"
-#include "vktAmberTestCase.hpp"
+#include "vktMemoryModelMessagePassingTests.hpp"
 
 #include "vkBufferWithMemory.hpp"
 #include "vkImageWithMemory.hpp"
@@ -2074,60 +2072,15 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     return tcu::TestStatus(res, qpGetTestResultName(res));
 }
 
-#ifndef CTS_USES_VULKANSC
-void checkPermutedIndexTestSupport(Context &context, std::string testName)
-{
-    DE_UNREF(testName);
-
-    const auto maxComputeWorkGroupCount       = context.getDeviceProperties().limits.maxComputeWorkGroupCount;
-    const auto maxComputeWorkGroupSize        = context.getDeviceProperties().limits.maxComputeWorkGroupSize;
-    const auto maxComputeWorkGroupInvocations = context.getDeviceProperties().limits.maxComputeWorkGroupInvocations;
-
-    if (maxComputeWorkGroupCount[0] < 256u)
-        TCU_THROW(NotSupportedError, "Minimum of 256 required for maxComputeWorkGroupCount.x");
-
-    if (maxComputeWorkGroupSize[0] < 256u)
-        TCU_THROW(NotSupportedError, "Minimum of 256 required for maxComputeWorkGroupSize.x");
-
-    if (maxComputeWorkGroupInvocations < 256u)
-        TCU_THROW(NotSupportedError, "Minimum of 256 required for maxComputeWorkGroupInvocations");
-}
-
-tcu::TestCaseGroup *createPermutedIndexTests(tcu::TestContext &testCtx)
-{
-    de::MovePtr<tcu::TestCaseGroup> permutedIndex(new tcu::TestCaseGroup(testCtx, "permuted_index"));
-    static const char dataDir[]      = "memory_model/message_passing/permuted_index";
-    static const std::string cases[] = {"barrier", "release_acquire", "release_acquire_atomic_payload"};
-
-    for (const auto &test : cases)
-    {
-        cts_amber::AmberTestCase *testCase =
-            cts_amber::createAmberTestCase(testCtx, test.c_str(), dataDir, (test + ".amber").c_str());
-        testCase->setCheckSupportCallback(checkPermutedIndexTestSupport);
-
-        permutedIndex->addChild(testCase);
-    }
-
-    return permutedIndex.release();
-}
-#endif // CTS_USES_VULKANSC
-
 } // namespace
 
-tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const std::string &name)
+tcu::TestCaseGroup *createLoadBufferTests(tcu::TestContext &testCtx)
 {
-    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, name.c_str()));
-
     typedef struct
     {
         uint32_t value;
         const char *name;
     } TestGroupCase;
-
-    TestGroupCase ttCases[] = {
-        {TT_MP, "message_passing"},
-        {TT_WAR, "write_after_read"},
-    };
 
     TestGroupCase core11Cases[] = {
         // Supported by Vulkan1.1
@@ -2229,186 +2182,533 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const std::string &na
         {STAGE_FRAGMENT, "frag"},
     };
 
-    for (int ttNdx = 0; ttNdx < DE_LENGTH_OF_ARRAY(ttCases); ttNdx++)
+    de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, "write_after_read"));
+
+    for (int core11Ndx = 0; core11Ndx < DE_LENGTH_OF_ARRAY(core11Cases); core11Ndx++)
     {
-        de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, ttCases[ttNdx].name));
-
-#ifndef CTS_USES_VULKANSC
-        // Permuted index tests for message passing.
-        if (ttCases[ttNdx].value == TT_MP)
-            ttGroup->addChild(createPermutedIndexTests(testCtx));
-#endif // CTS_USES_VULKANSC
-
-        for (int core11Ndx = 0; core11Ndx < DE_LENGTH_OF_ARRAY(core11Cases); core11Ndx++)
+        de::MovePtr<tcu::TestCaseGroup> core11Group(new tcu::TestCaseGroup(testCtx, core11Cases[core11Ndx].name));
+        for (int dtNdx = 0; dtNdx < DE_LENGTH_OF_ARRAY(dtCases); dtNdx++)
         {
-            de::MovePtr<tcu::TestCaseGroup> core11Group(new tcu::TestCaseGroup(testCtx, core11Cases[core11Ndx].name));
-            for (int dtNdx = 0; dtNdx < DE_LENGTH_OF_ARRAY(dtCases); dtNdx++)
+            de::MovePtr<tcu::TestCaseGroup> dtGroup(new tcu::TestCaseGroup(testCtx, dtCases[dtNdx].name));
+            for (int cohNdx = 0; cohNdx < DE_LENGTH_OF_ARRAY(cohCases); cohNdx++)
             {
-                de::MovePtr<tcu::TestCaseGroup> dtGroup(new tcu::TestCaseGroup(testCtx, dtCases[dtNdx].name));
-                for (int cohNdx = 0; cohNdx < DE_LENGTH_OF_ARRAY(cohCases); cohNdx++)
+                de::MovePtr<tcu::TestCaseGroup> cohGroup(new tcu::TestCaseGroup(testCtx, cohCases[cohNdx].name));
+                for (int stNdx = 0; stNdx < DE_LENGTH_OF_ARRAY(stCases); stNdx++)
                 {
-                    de::MovePtr<tcu::TestCaseGroup> cohGroup(new tcu::TestCaseGroup(testCtx, cohCases[cohNdx].name));
-                    for (int stNdx = 0; stNdx < DE_LENGTH_OF_ARRAY(stCases); stNdx++)
+                    de::MovePtr<tcu::TestCaseGroup> stGroup(new tcu::TestCaseGroup(testCtx, stCases[stNdx].name));
+                    for (int rmwNdx = 0; rmwNdx < DE_LENGTH_OF_ARRAY(rmwCases); rmwNdx++)
                     {
-                        de::MovePtr<tcu::TestCaseGroup> stGroup(new tcu::TestCaseGroup(testCtx, stCases[stNdx].name));
-                        for (int rmwNdx = 0; rmwNdx < DE_LENGTH_OF_ARRAY(rmwCases); rmwNdx++)
+                        de::MovePtr<tcu::TestCaseGroup> rmwGroup(
+                            new tcu::TestCaseGroup(testCtx, rmwCases[rmwNdx].name));
+                        for (int scopeNdx = 0; scopeNdx < DE_LENGTH_OF_ARRAY(scopeCases); scopeNdx++)
                         {
-                            de::MovePtr<tcu::TestCaseGroup> rmwGroup(
-                                new tcu::TestCaseGroup(testCtx, rmwCases[rmwNdx].name));
-                            for (int scopeNdx = 0; scopeNdx < DE_LENGTH_OF_ARRAY(scopeCases); scopeNdx++)
+                            de::MovePtr<tcu::TestCaseGroup> scopeGroup(
+                                new tcu::TestCaseGroup(testCtx, scopeCases[scopeNdx].name));
+                            for (int plNdx = 0; plNdx < DE_LENGTH_OF_ARRAY(plCases); plNdx++)
                             {
-                                de::MovePtr<tcu::TestCaseGroup> scopeGroup(
-                                    new tcu::TestCaseGroup(testCtx, scopeCases[scopeNdx].name));
-                                for (int plNdx = 0; plNdx < DE_LENGTH_OF_ARRAY(plCases); plNdx++)
+                                de::MovePtr<tcu::TestCaseGroup> plGroup(
+                                    new tcu::TestCaseGroup(testCtx, plCases[plNdx].name));
+                                for (int pscNdx = 0; pscNdx < DE_LENGTH_OF_ARRAY(pscCases); pscNdx++)
                                 {
-                                    de::MovePtr<tcu::TestCaseGroup> plGroup(
-                                        new tcu::TestCaseGroup(testCtx, plCases[plNdx].name));
-                                    for (int pscNdx = 0; pscNdx < DE_LENGTH_OF_ARRAY(pscCases); pscNdx++)
+                                    de::MovePtr<tcu::TestCaseGroup> pscGroup(
+                                        new tcu::TestCaseGroup(testCtx, pscCases[pscNdx].name));
+                                    for (int glNdx = 0; glNdx < DE_LENGTH_OF_ARRAY(glCases); glNdx++)
                                     {
-                                        de::MovePtr<tcu::TestCaseGroup> pscGroup(
-                                            new tcu::TestCaseGroup(testCtx, pscCases[pscNdx].name));
-                                        for (int glNdx = 0; glNdx < DE_LENGTH_OF_ARRAY(glCases); glNdx++)
+                                        de::MovePtr<tcu::TestCaseGroup> glGroup(
+                                            new tcu::TestCaseGroup(testCtx, glCases[glNdx].name));
+                                        for (int gscNdx = 0; gscNdx < DE_LENGTH_OF_ARRAY(gscCases); gscNdx++)
                                         {
-                                            de::MovePtr<tcu::TestCaseGroup> glGroup(
-                                                new tcu::TestCaseGroup(testCtx, glCases[glNdx].name));
-                                            for (int gscNdx = 0; gscNdx < DE_LENGTH_OF_ARRAY(gscCases); gscNdx++)
+                                            de::MovePtr<tcu::TestCaseGroup> gscGroup(
+                                                new tcu::TestCaseGroup(testCtx, gscCases[gscNdx].name));
+                                            for (int stageNdx = 0; stageNdx < DE_LENGTH_OF_ARRAY(stageCases);
+                                                 stageNdx++)
                                             {
-                                                de::MovePtr<tcu::TestCaseGroup> gscGroup(
-                                                    new tcu::TestCaseGroup(testCtx, gscCases[gscNdx].name));
-                                                for (int stageNdx = 0; stageNdx < DE_LENGTH_OF_ARRAY(stageCases);
-                                                     stageNdx++)
+                                                CaseDef c = {
+                                                    !!plCases[plNdx].value,               // bool payloadMemLocal;
+                                                    !!glCases[glNdx].value,               // bool guardMemLocal;
+                                                    !!cohCases[cohNdx].value,             // bool coherent;
+                                                    !!core11Cases[core11Ndx].value,       // bool core11;
+                                                    !!rmwCases[rmwNdx].value,             // bool atomicRMW;
+                                                    TT_WAR,                               // TestType testType;
+                                                    (StorageClass)pscCases[pscNdx].value, // StorageClass payloadSC;
+                                                    (StorageClass)gscCases[gscNdx].value, // StorageClass guardSC;
+                                                    (Scope)scopeCases[scopeNdx].value,    // Scope scope;
+                                                    (SyncType)stCases[stNdx].value,       // SyncType syncType;
+                                                    (Stage)stageCases[stageNdx].value,    // Stage stage;
+                                                    (DataType)dtCases[dtNdx].value,       // DataType dataType;
+                                                    false,                                // bool transitive;
+                                                    false,                                // bool transitiveVis;
+                                                };
+
+                                                // Mustpass11 tests should only exercise things we expect to work on
+                                                // existing implementations. Exclude noncoherent tests which require
+                                                // new extensions, and assume atomic synchronization wouldn't work
+                                                // (i.e. atomics may be implemented as relaxed atomics). Exclude
+                                                // queuefamily scope which doesn't exist in Vulkan 1.1. Exclude
+                                                // physical storage buffer which doesn't support the legacy decorations.
+                                                if (c.core11 &&
+                                                    (c.coherent == 0 || c.syncType == ST_FENCE_ATOMIC ||
+                                                     c.syncType == ST_ATOMIC_FENCE ||
+                                                     c.syncType == ST_ATOMIC_ATOMIC ||
+                                                     c.dataType == DATA_TYPE_UINT64 ||
+                                                     c.dataType == DATA_TYPE_FLOAT64 ||
+                                                     c.scope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER ||
+                                                     c.guardSC == SC_PHYSBUFFER))
                                                 {
-                                                    CaseDef c = {
-                                                        !!plCases[plNdx].value,               // bool payloadMemLocal;
-                                                        !!glCases[glNdx].value,               // bool guardMemLocal;
-                                                        !!cohCases[cohNdx].value,             // bool coherent;
-                                                        !!core11Cases[core11Ndx].value,       // bool core11;
-                                                        !!rmwCases[rmwNdx].value,             // bool atomicRMW;
-                                                        (TestType)ttCases[ttNdx].value,       // TestType testType;
-                                                        (StorageClass)pscCases[pscNdx].value, // StorageClass payloadSC;
-                                                        (StorageClass)gscCases[gscNdx].value, // StorageClass guardSC;
-                                                        (Scope)scopeCases[scopeNdx].value,    // Scope scope;
-                                                        (SyncType)stCases[stNdx].value,       // SyncType syncType;
-                                                        (Stage)stageCases[stageNdx].value,    // Stage stage;
-                                                        (DataType)dtCases[dtNdx].value,       // DataType dataType;
-                                                        false,                                // bool transitive;
-                                                        false,                                // bool transitiveVis;
-                                                    };
-
-                                                    // Mustpass11 tests should only exercise things we expect to work on
-                                                    // existing implementations. Exclude noncoherent tests which require
-                                                    // new extensions, and assume atomic synchronization wouldn't work
-                                                    // (i.e. atomics may be implemented as relaxed atomics). Exclude
-                                                    // queuefamily scope which doesn't exist in Vulkan 1.1. Exclude
-                                                    // physical storage buffer which doesn't support the legacy decorations.
-                                                    if (c.core11 &&
-                                                        (c.coherent == 0 || c.syncType == ST_FENCE_ATOMIC ||
-                                                         c.syncType == ST_ATOMIC_FENCE ||
-                                                         c.syncType == ST_ATOMIC_ATOMIC ||
-                                                         c.dataType == DATA_TYPE_UINT64 ||
-                                                         c.dataType == DATA_TYPE_FLOAT64 ||
-                                                         c.scope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER ||
-                                                         c.guardSC == SC_PHYSBUFFER))
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    if (c.stage != STAGE_COMPUTE && c.scope == SCOPE_WORKGROUP)
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    // Don't exercise local and non-local for workgroup memory
-                                                    // Also don't exercise workgroup memory for non-compute stages
-                                                    if (c.payloadSC == SC_WORKGROUP &&
-                                                        (c.payloadMemLocal != 0 || c.stage != STAGE_COMPUTE))
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    if (c.guardSC == SC_WORKGROUP &&
-                                                        (c.guardMemLocal != 0 || c.stage != STAGE_COMPUTE))
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    // No support for control/split barrier with larger than workgroup scope, or non-compute stages
-                                                    if ((c.syncType == ST_CONTROL_BARRIER ||
-                                                         c.syncType == ST_CONTROL_AND_MEMORY_BARRIER ||
-                                                         isSplitBarrier(c.syncType)) &&
-                                                        (c.scope == SCOPE_DEVICE || c.scope == SCOPE_QUEUEFAMILY ||
-                                                         c.stage != STAGE_COMPUTE))
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    if (c.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER &&
-                                                        c.scope != SCOPE_WORKGROUP)
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    // Limit RMW atomics to ST_ATOMIC_ATOMIC, just to reduce # of test cases
-                                                    if (c.atomicRMW && c.syncType != ST_ATOMIC_ATOMIC)
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    // uint64/float32/float64 testing is primarily for atomics, so only test it for ST_ATOMIC_ATOMIC
-                                                    const bool atomicTesting = (c.dataType == DATA_TYPE_UINT64 ||
-                                                                                c.dataType == DATA_TYPE_FLOAT32 ||
-                                                                                c.dataType == DATA_TYPE_FLOAT64);
-                                                    if (atomicTesting && c.syncType != ST_ATOMIC_ATOMIC)
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    // No 64-bit image types, so skip tests with both payload and guard in image memory
-                                                    if (c.dataType == DATA_TYPE_UINT64 && c.payloadSC == SC_IMAGE &&
-                                                        c.guardSC == SC_IMAGE)
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    // No support for atomic operations on 64-bit floating point images
-                                                    if (c.dataType == DATA_TYPE_FLOAT64 &&
-                                                        (c.payloadSC == SC_IMAGE || c.guardSC == SC_IMAGE))
-                                                    {
-                                                        continue;
-                                                    }
-                                                    // Control barrier tests don't use a guard variable, so only run them with gsc,gl==0
-                                                    if ((c.syncType == ST_CONTROL_BARRIER ||
-                                                         c.syncType == ST_CONTROL_AND_MEMORY_BARRIER) &&
-                                                        (c.guardSC != 0 || c.guardMemLocal != 0))
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    gscGroup->addChild(
-                                                        new MemoryModelTestCase(testCtx, stageCases[stageNdx].name, c));
+                                                    continue;
                                                 }
-                                                glGroup->addChild(gscGroup.release());
+
+                                                if (c.stage != STAGE_COMPUTE && c.scope == SCOPE_WORKGROUP)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // Don't exercise local and non-local for workgroup memory
+                                                // Also don't exercise workgroup memory for non-compute stages
+                                                if (c.payloadSC == SC_WORKGROUP &&
+                                                    (c.payloadMemLocal != 0 || c.stage != STAGE_COMPUTE))
+                                                {
+                                                    continue;
+                                                }
+
+                                                if (c.guardSC == SC_WORKGROUP &&
+                                                    (c.guardMemLocal != 0 || c.stage != STAGE_COMPUTE))
+                                                {
+                                                    continue;
+                                                }
+
+                                                // No support for control/split barrier with larger than workgroup scope, or non-compute stages
+                                                if ((c.syncType == ST_CONTROL_BARRIER ||
+                                                     c.syncType == ST_CONTROL_AND_MEMORY_BARRIER ||
+                                                     isSplitBarrier(c.syncType)) &&
+                                                    (c.scope == SCOPE_DEVICE || c.scope == SCOPE_QUEUEFAMILY ||
+                                                     c.stage != STAGE_COMPUTE))
+                                                {
+                                                    continue;
+                                                }
+
+                                                if (c.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER &&
+                                                    c.scope != SCOPE_WORKGROUP)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // Limit RMW atomics to ST_ATOMIC_ATOMIC, just to reduce # of test cases
+                                                if (c.atomicRMW && c.syncType != ST_ATOMIC_ATOMIC)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // uint64/float32/float64 testing is primarily for atomics, so only test it for ST_ATOMIC_ATOMIC
+                                                const bool atomicTesting = (c.dataType == DATA_TYPE_UINT64 ||
+                                                                            c.dataType == DATA_TYPE_FLOAT32 ||
+                                                                            c.dataType == DATA_TYPE_FLOAT64);
+                                                if (atomicTesting && c.syncType != ST_ATOMIC_ATOMIC)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // No 64-bit image types, so skip tests with both payload and guard in image memory
+                                                if (c.dataType == DATA_TYPE_UINT64 && c.payloadSC == SC_IMAGE &&
+                                                    c.guardSC == SC_IMAGE)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // No support for atomic operations on 64-bit floating point images
+                                                if (c.dataType == DATA_TYPE_FLOAT64 &&
+                                                    (c.payloadSC == SC_IMAGE || c.guardSC == SC_IMAGE))
+                                                {
+                                                    continue;
+                                                }
+                                                // Control barrier tests don't use a guard variable, so only run them with gsc,gl==0
+                                                if ((c.syncType == ST_CONTROL_BARRIER ||
+                                                     c.syncType == ST_CONTROL_AND_MEMORY_BARRIER) &&
+                                                    (c.guardSC != 0 || c.guardMemLocal != 0))
+                                                {
+                                                    continue;
+                                                }
+
+                                                gscGroup->addChild(
+                                                    new MemoryModelTestCase(testCtx, stageCases[stageNdx].name, c));
                                             }
-                                            pscGroup->addChild(glGroup.release());
+                                            glGroup->addChild(gscGroup.release());
                                         }
-                                        plGroup->addChild(pscGroup.release());
+                                        pscGroup->addChild(glGroup.release());
                                     }
-                                    scopeGroup->addChild(plGroup.release());
+                                    plGroup->addChild(pscGroup.release());
                                 }
-                                rmwGroup->addChild(scopeGroup.release());
+                                scopeGroup->addChild(plGroup.release());
                             }
-                            stGroup->addChild(rmwGroup.release());
+                            rmwGroup->addChild(scopeGroup.release());
                         }
-                        cohGroup->addChild(stGroup.release());
+                        stGroup->addChild(rmwGroup.release());
                     }
-                    dtGroup->addChild(cohGroup.release());
+                    cohGroup->addChild(stGroup.release());
                 }
-                core11Group->addChild(dtGroup.release());
+                dtGroup->addChild(cohGroup.release());
             }
-            ttGroup->addChild(core11Group.release());
+            core11Group->addChild(dtGroup.release());
         }
-        group->addChild(ttGroup.release());
+        ttGroup->addChild(core11Group.release());
     }
+
+    return ttGroup.release();
+}
+
+tcu::TestCaseGroup *createMessagePassingTests(tcu::TestContext &testCtx)
+{
+    typedef struct
+    {
+        uint32_t value;
+        const char *name;
+    } TestGroupCase;
+
+    TestGroupCase core11Cases[] = {
+        // Supported by Vulkan1.1
+        {1, "core11"},
+        // Requires VK_KHR_vulkan_memory_model extension
+        {0, "ext"},
+    };
+
+    TestGroupCase dtCases[] = {
+        // uint32_t atomics
+        {DATA_TYPE_UINT, "u32"},
+        // uint64_t atomics
+        {DATA_TYPE_UINT64, "u64"},
+        // float32 atomics
+        {DATA_TYPE_FLOAT32, "f32"},
+        // float64 atomics
+        {DATA_TYPE_FLOAT64, "f64"},
+    };
+
+    TestGroupCase cohCases[] = {
+        // coherent payload variable
+        {1, "coherent"},
+        // noncoherent payload variable
+        {0, "noncoherent"},
+    };
+
+    TestGroupCase stCases[] = {
+        // release fence, acquire fence
+        {ST_FENCE_FENCE, "fence_fence"},
+        // release fence, atomic acquire
+        {ST_FENCE_ATOMIC, "fence_atomic"},
+        // atomic release, acquire fence
+        {ST_ATOMIC_FENCE, "atomic_fence"},
+        // atomic release, atomic acquire
+        {ST_ATOMIC_ATOMIC, "atomic_atomic"},
+        // control barrier
+        {ST_CONTROL_BARRIER, "control_barrier"},
+        // control barrier with separate memory barriers
+        {ST_CONTROL_AND_MEMORY_BARRIER, "control_and_memory_barrier"},
+        // split control barrier with release/acquire
+        {ST_SPLIT_CONTROL_BARRIER, "split_control_barrier"},
+        // split control barrier with separate memory barriers
+        {ST_SPLIT_CONTROL_AND_MEMORY_BARRIER, "split_control_and_memory_barrier"},
+        // split control barrier with barrier
+        {ST_SPLIT_CONTROL_BARRIER_AND_BARRIER, "split_control_barrier_and_barrier"},
+    };
+
+    TestGroupCase rmwCases[] = {
+        {0, "atomicwrite"},
+        {1, "atomicrmw"},
+    };
+
+    TestGroupCase scopeCases[] = {
+        {SCOPE_DEVICE, "device"},
+        {SCOPE_QUEUEFAMILY, "queuefamily"},
+        {SCOPE_WORKGROUP, "workgroup"},
+        {SCOPE_SUBGROUP, "subgroup"},
+    };
+
+    TestGroupCase plCases[] = {
+        // payload variable in non-local memory
+        {0, "payload_nonlocal"},
+        // payload variable in local memory
+        {1, "payload_local"},
+    };
+
+    TestGroupCase pscCases[] = {
+        // payload variable in buffer memory
+        {SC_BUFFER, "buffer"},
+        // payload variable in image memory
+        {SC_IMAGE, "image"},
+        // payload variable in workgroup memory
+        {SC_WORKGROUP, "workgroup"},
+        // payload variable in physical storage buffer memory
+        {SC_PHYSBUFFER, "physbuffer"},
+    };
+
+    TestGroupCase glCases[] = {
+        // guard variable in non-local memory
+        {0, "guard_nonlocal"},
+        // guard variable in local memory
+        {1, "guard_local"},
+    };
+
+    TestGroupCase gscCases[] = {
+        // guard variable in buffer memory
+        {SC_BUFFER, "buffer"},
+        // guard variable in image memory
+        {SC_IMAGE, "image"},
+        // guard variable in workgroup memory
+        {SC_WORKGROUP, "workgroup"},
+        // guard variable in physical storage buffer memory
+        {SC_PHYSBUFFER, "physbuffer"},
+    };
+
+    TestGroupCase stageCases[] = {
+        {STAGE_COMPUTE, "comp"},
+        {STAGE_VERTEX, "vert"},
+        {STAGE_FRAGMENT, "frag"},
+    };
+
+    de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, "message_passing"));
+
+    for (int core11Ndx = 0; core11Ndx < DE_LENGTH_OF_ARRAY(core11Cases); core11Ndx++)
+    {
+        de::MovePtr<tcu::TestCaseGroup> core11Group(new tcu::TestCaseGroup(testCtx, core11Cases[core11Ndx].name));
+        for (int dtNdx = 0; dtNdx < DE_LENGTH_OF_ARRAY(dtCases); dtNdx++)
+        {
+            de::MovePtr<tcu::TestCaseGroup> dtGroup(new tcu::TestCaseGroup(testCtx, dtCases[dtNdx].name));
+            for (int cohNdx = 0; cohNdx < DE_LENGTH_OF_ARRAY(cohCases); cohNdx++)
+            {
+                de::MovePtr<tcu::TestCaseGroup> cohGroup(new tcu::TestCaseGroup(testCtx, cohCases[cohNdx].name));
+                for (int stNdx = 0; stNdx < DE_LENGTH_OF_ARRAY(stCases); stNdx++)
+                {
+                    de::MovePtr<tcu::TestCaseGroup> stGroup(new tcu::TestCaseGroup(testCtx, stCases[stNdx].name));
+                    for (int rmwNdx = 0; rmwNdx < DE_LENGTH_OF_ARRAY(rmwCases); rmwNdx++)
+                    {
+                        de::MovePtr<tcu::TestCaseGroup> rmwGroup(
+                            new tcu::TestCaseGroup(testCtx, rmwCases[rmwNdx].name));
+                        for (int scopeNdx = 0; scopeNdx < DE_LENGTH_OF_ARRAY(scopeCases); scopeNdx++)
+                        {
+                            de::MovePtr<tcu::TestCaseGroup> scopeGroup(
+                                new tcu::TestCaseGroup(testCtx, scopeCases[scopeNdx].name));
+                            for (int plNdx = 0; plNdx < DE_LENGTH_OF_ARRAY(plCases); plNdx++)
+                            {
+                                de::MovePtr<tcu::TestCaseGroup> plGroup(
+                                    new tcu::TestCaseGroup(testCtx, plCases[plNdx].name));
+                                for (int pscNdx = 0; pscNdx < DE_LENGTH_OF_ARRAY(pscCases); pscNdx++)
+                                {
+                                    de::MovePtr<tcu::TestCaseGroup> pscGroup(
+                                        new tcu::TestCaseGroup(testCtx, pscCases[pscNdx].name));
+                                    for (int glNdx = 0; glNdx < DE_LENGTH_OF_ARRAY(glCases); glNdx++)
+                                    {
+                                        de::MovePtr<tcu::TestCaseGroup> glGroup(
+                                            new tcu::TestCaseGroup(testCtx, glCases[glNdx].name));
+                                        for (int gscNdx = 0; gscNdx < DE_LENGTH_OF_ARRAY(gscCases); gscNdx++)
+                                        {
+                                            de::MovePtr<tcu::TestCaseGroup> gscGroup(
+                                                new tcu::TestCaseGroup(testCtx, gscCases[gscNdx].name));
+                                            for (int stageNdx = 0; stageNdx < DE_LENGTH_OF_ARRAY(stageCases);
+                                                 stageNdx++)
+                                            {
+                                                CaseDef c = {
+                                                    !!plCases[plNdx].value,               // bool payloadMemLocal;
+                                                    !!glCases[glNdx].value,               // bool guardMemLocal;
+                                                    !!cohCases[cohNdx].value,             // bool coherent;
+                                                    !!core11Cases[core11Ndx].value,       // bool core11;
+                                                    !!rmwCases[rmwNdx].value,             // bool atomicRMW;
+                                                    TT_MP,                                // TestType testType;
+                                                    (StorageClass)pscCases[pscNdx].value, // StorageClass payloadSC;
+                                                    (StorageClass)gscCases[gscNdx].value, // StorageClass guardSC;
+                                                    (Scope)scopeCases[scopeNdx].value,    // Scope scope;
+                                                    (SyncType)stCases[stNdx].value,       // SyncType syncType;
+                                                    (Stage)stageCases[stageNdx].value,    // Stage stage;
+                                                    (DataType)dtCases[dtNdx].value,       // DataType dataType;
+                                                    false,                                // bool transitive;
+                                                    false,                                // bool transitiveVis;
+                                                };
+
+                                                // Mustpass11 tests should only exercise things we expect to work on
+                                                // existing implementations. Exclude noncoherent tests which require
+                                                // new extensions, and assume atomic synchronization wouldn't work
+                                                // (i.e. atomics may be implemented as relaxed atomics). Exclude
+                                                // queuefamily scope which doesn't exist in Vulkan 1.1. Exclude
+                                                // physical storage buffer which doesn't support the legacy decorations.
+                                                if (c.core11 &&
+                                                    (c.coherent == 0 || c.syncType == ST_FENCE_ATOMIC ||
+                                                     c.syncType == ST_ATOMIC_FENCE ||
+                                                     c.syncType == ST_ATOMIC_ATOMIC ||
+                                                     c.dataType == DATA_TYPE_UINT64 ||
+                                                     c.dataType == DATA_TYPE_FLOAT64 ||
+                                                     c.scope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER ||
+                                                     c.guardSC == SC_PHYSBUFFER))
+                                                {
+                                                    continue;
+                                                }
+
+                                                if (c.stage != STAGE_COMPUTE && c.scope == SCOPE_WORKGROUP)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // Don't exercise local and non-local for workgroup memory
+                                                // Also don't exercise workgroup memory for non-compute stages
+                                                if (c.payloadSC == SC_WORKGROUP &&
+                                                    (c.payloadMemLocal != 0 || c.stage != STAGE_COMPUTE))
+                                                {
+                                                    continue;
+                                                }
+
+                                                if (c.guardSC == SC_WORKGROUP &&
+                                                    (c.guardMemLocal != 0 || c.stage != STAGE_COMPUTE))
+                                                {
+                                                    continue;
+                                                }
+
+                                                // No support for control/split barrier with larger than workgroup scope, or non-compute stages
+                                                if ((c.syncType == ST_CONTROL_BARRIER ||
+                                                     c.syncType == ST_CONTROL_AND_MEMORY_BARRIER ||
+                                                     isSplitBarrier(c.syncType)) &&
+                                                    (c.scope == SCOPE_DEVICE || c.scope == SCOPE_QUEUEFAMILY ||
+                                                     c.stage != STAGE_COMPUTE))
+                                                {
+                                                    continue;
+                                                }
+
+                                                if (c.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER &&
+                                                    c.scope != SCOPE_WORKGROUP)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // Limit RMW atomics to ST_ATOMIC_ATOMIC, just to reduce # of test cases
+                                                if (c.atomicRMW && c.syncType != ST_ATOMIC_ATOMIC)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // uint64/float32/float64 testing is primarily for atomics, so only test it for ST_ATOMIC_ATOMIC
+                                                const bool atomicTesting = (c.dataType == DATA_TYPE_UINT64 ||
+                                                                            c.dataType == DATA_TYPE_FLOAT32 ||
+                                                                            c.dataType == DATA_TYPE_FLOAT64);
+                                                if (atomicTesting && c.syncType != ST_ATOMIC_ATOMIC)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // No 64-bit image types, so skip tests with both payload and guard in image memory
+                                                if (c.dataType == DATA_TYPE_UINT64 && c.payloadSC == SC_IMAGE &&
+                                                    c.guardSC == SC_IMAGE)
+                                                {
+                                                    continue;
+                                                }
+
+                                                // No support for atomic operations on 64-bit floating point images
+                                                if (c.dataType == DATA_TYPE_FLOAT64 &&
+                                                    (c.payloadSC == SC_IMAGE || c.guardSC == SC_IMAGE))
+                                                {
+                                                    continue;
+                                                }
+                                                // Control barrier tests don't use a guard variable, so only run them with gsc,gl==0
+                                                if ((c.syncType == ST_CONTROL_BARRIER ||
+                                                     c.syncType == ST_CONTROL_AND_MEMORY_BARRIER) &&
+                                                    (c.guardSC != 0 || c.guardMemLocal != 0))
+                                                {
+                                                    continue;
+                                                }
+
+                                                gscGroup->addChild(
+                                                    new MemoryModelTestCase(testCtx, stageCases[stageNdx].name, c));
+                                            }
+                                            glGroup->addChild(gscGroup.release());
+                                        }
+                                        pscGroup->addChild(glGroup.release());
+                                    }
+                                    plGroup->addChild(pscGroup.release());
+                                }
+                                scopeGroup->addChild(plGroup.release());
+                            }
+                            rmwGroup->addChild(scopeGroup.release());
+                        }
+                        stGroup->addChild(rmwGroup.release());
+                    }
+                    cohGroup->addChild(stGroup.release());
+                }
+                dtGroup->addChild(cohGroup.release());
+            }
+            core11Group->addChild(dtGroup.release());
+        }
+        ttGroup->addChild(core11Group.release());
+    }
+
+    return ttGroup.release();
+}
+
+tcu::TestCaseGroup *createTransitiveTests(tcu::TestContext &testCtx)
+{
+    typedef struct
+    {
+        uint32_t value;
+        const char *name;
+    } TestGroupCase;
+
+    TestGroupCase cohCases[] = {
+        // coherent payload variable
+        {1, "coherent"},
+        // noncoherent payload variable
+        {0, "noncoherent"},
+    };
+
+    TestGroupCase stCases[] = {
+        // release fence, acquire fence
+        {ST_FENCE_FENCE, "fence_fence"},
+        // release fence, atomic acquire
+        {ST_FENCE_ATOMIC, "fence_atomic"},
+        // atomic release, acquire fence
+        {ST_ATOMIC_FENCE, "atomic_fence"},
+        // atomic release, atomic acquire
+        {ST_ATOMIC_ATOMIC, "atomic_atomic"},
+        // control barrier
+        {ST_CONTROL_BARRIER, "control_barrier"},
+        // control barrier with separate memory barriers
+        {ST_CONTROL_AND_MEMORY_BARRIER, "control_and_memory_barrier"},
+        // split control barrier with release/acquire
+        {ST_SPLIT_CONTROL_BARRIER, "split_control_barrier"},
+        // split control barrier with separate memory barriers
+        {ST_SPLIT_CONTROL_AND_MEMORY_BARRIER, "split_control_and_memory_barrier"},
+        // split control barrier with barrier
+        {ST_SPLIT_CONTROL_BARRIER_AND_BARRIER, "split_control_barrier_and_barrier"},
+    };
+
+    TestGroupCase plCases[] = {
+        // payload variable in non-local memory
+        {0, "payload_nonlocal"},
+        // payload variable in local memory
+        {1, "payload_local"},
+    };
+
+    TestGroupCase pscCases[] = {
+        // payload variable in buffer memory
+        {SC_BUFFER, "buffer"},
+        // payload variable in image memory
+        {SC_IMAGE, "image"},
+        // payload variable in workgroup memory
+        {SC_WORKGROUP, "workgroup"},
+        // payload variable in physical storage buffer memory
+        {SC_PHYSBUFFER, "physbuffer"},
+    };
+
+    TestGroupCase glCases[] = {
+        // guard variable in non-local memory
+        {0, "guard_nonlocal"},
+        // guard variable in local memory
+        {1, "guard_local"},
+    };
+
+    TestGroupCase gscCases[] = {
+        // guard variable in buffer memory
+        {SC_BUFFER, "buffer"},
+        // guard variable in image memory
+        {SC_IMAGE, "image"},
+        // guard variable in workgroup memory
+        {SC_WORKGROUP, "workgroup"},
+        // guard variable in physical storage buffer memory
+        {SC_PHYSBUFFER, "physbuffer"},
+    };
 
     TestGroupCase transVisCases[] = {
         // destination invocation acquires
@@ -2478,14 +2778,8 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const std::string &na
         }
         transGroup->addChild(cohGroup.release());
     }
-    group->addChild(transGroup.release());
 
-    // Padding tests.
-    group->addChild(createPaddingTests(testCtx));
-    // Shared memory layout tests.
-    group->addChild(createSharedMemoryLayoutTests(testCtx));
-
-    return group.release();
+    return transGroup.release();
 }
 
 } // namespace vkt::MemoryModel
