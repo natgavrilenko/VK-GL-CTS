@@ -20,7 +20,7 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model Amber Tests
+ * \brief Memory Model Amber Tests
  *//*--------------------------------------------------------------------*/
 
 #include "vktMemoryModelAmberTests.hpp"
@@ -86,7 +86,9 @@ tcu::TestCaseGroup *createPermutedIndexTests(tcu::TestContext &testCtx)
 tcu::TestCaseGroup *createAmberTests(tcu::TestContext &testCtx)
 {
     de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "amber"));
+
     group->addChild(createPermutedIndexTests(testCtx));
+
     return group.release();
 }
 

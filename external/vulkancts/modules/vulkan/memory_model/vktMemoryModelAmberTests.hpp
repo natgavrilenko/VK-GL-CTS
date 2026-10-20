@@ -20,7 +20,7 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model Amber Tests.
+ * \brief Memory Model Amber Tests
  *//*--------------------------------------------------------------------*/
 
 #include "tcuDefs.hpp"

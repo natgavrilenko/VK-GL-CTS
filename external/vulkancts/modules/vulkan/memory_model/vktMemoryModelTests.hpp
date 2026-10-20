@@ -22,7 +22,7 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model Tests
+ * \brief Memory Model Tests
  *//*--------------------------------------------------------------------*/
 
 #include "tcuDefs.hpp"

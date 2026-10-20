@@ -19,7 +19,7 @@
  *
  *//*!
  * \file
- * \brief Shared memory model layout tests.
+ * \brief Shared memory model layout tests
  *//*--------------------------------------------------------------------*/
 
 #include "vktMemoryModelSharedLayoutTests.hpp"

@@ -21,7 +21,7 @@
  *
  *//*!
  * \file
- * \brief Shared memory layout tests.
+ * \brief Shared memory layout tests
  *//*--------------------------------------------------------------------*/
 
 #include "tcuTestCase.hpp"

@@ -1,5 +1,5 @@
-#ifndef _VKTMEMORYMODELMESSAGEPASSINGTESTS_HPP
-#define _VKTMEMORYMODELMESSAGEPASSINGTESTS_HPP
+#ifndef _VKTMEMORYMODELPATTERNTRANSITIVETESTS_HPP
+#define _VKTMEMORYMODELPATTERNTRANSITIVETESTS_HPP
 /*-------------------------------------------------------------------------
  * Vulkan Conformance Tests
  * ------------------------
@@ -20,7 +20,7 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model tests.
+ * \brief Memory Model Pattern Transitive Tests
  *//*--------------------------------------------------------------------*/
 
 #include "tcuDefs.hpp"
@@ -31,11 +31,9 @@ namespace vkt
 namespace MemoryModel
 {
 
-tcu::TestCaseGroup *createMessagePassingTests(tcu::TestContext &testCtx);
-tcu::TestCaseGroup *createLoadBufferTests(tcu::TestContext &testCtx);
 tcu::TestCaseGroup *createTransitiveTests(tcu::TestContext &testCtx);
 
 } // namespace MemoryModel
 } // namespace vkt
 
-#endif // _VKTMEMORYMODELMESSAGEPASSINGTESTS_HPP
+#endif // _VKTMEMORYMODELPATTERNTRANSITIVETESTS_HPP

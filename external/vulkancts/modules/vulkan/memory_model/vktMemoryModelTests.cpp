@@ -18,42 +18,36 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model Tests
+ * \brief Memory Model Tests
  *//*--------------------------------------------------------------------*/
 
 #include "vktMemoryModelTests.hpp"
-
 #include "vktMemoryModelAmberTests.hpp"
-#include "vktMemoryModelMessagePassingTests.hpp"
 #include "vktMemoryModelPaddingTests.hpp"
+#include "vktMemoryModelPatternMessagePassingTests.hpp"
+#include "vktMemoryModelPatternTransitiveTests.hpp"
 #include "vktMemoryModelSharedLayoutTests.hpp"
-#include "vktTestGroupUtil.hpp"
+
+#include "deUniquePtr.hpp"
+#include "tcuTestCase.hpp"
 
 namespace vkt
 {
 namespace MemoryModel
 {
 
-namespace
-{
-
-void createChildren(tcu::TestCaseGroup *memoryModelTests)
-{
-    tcu::TestContext &testCtx = memoryModelTests->getTestContext();
-
-    memoryModelTests->addChild(createAmberTests(testCtx));
-    memoryModelTests->addChild(createMessagePassingTests(testCtx));
-    memoryModelTests->addChild(createLoadBufferTests(testCtx));
-    memoryModelTests->addChild(createTransitiveTests(testCtx));
-    memoryModelTests->addChild(createPaddingTests(testCtx));
-    memoryModelTests->addChild(createSharedMemoryLayoutTests(testCtx));
-}
-
-} // namespace
-
 tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const std::string &name)
 {
-    return createTestGroup(testCtx, name, createChildren);
+    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, name.c_str()));
+
+    group->addChild(createAmberTests(testCtx));
+    group->addChild(createMessagePassingTests(testCtx));
+    group->addChild(createLoadBufferTests(testCtx));
+    group->addChild(createTransitiveTests(testCtx));
+    group->addChild(createPaddingTests(testCtx));
+    group->addChild(createSharedMemoryLayoutTests(testCtx));
+
+    return group.release();
 }
 
 } // namespace MemoryModel

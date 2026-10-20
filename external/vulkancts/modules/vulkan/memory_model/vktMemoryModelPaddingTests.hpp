@@ -21,7 +21,7 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model padding access tests.
+ * \brief Memory Model padding access tests
  *//*--------------------------------------------------------------------*/
 
 #include "tcuDefs.hpp"

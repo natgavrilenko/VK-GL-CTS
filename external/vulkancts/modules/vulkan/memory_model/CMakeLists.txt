@@ -7,10 +7,16 @@ include_directories(
 set(DEQP_VK_MEMORY_MODEL_SRCS
 	vktMemoryModelAmberTests.cpp
 	vktMemoryModelAmberTests.hpp
-	vktMemoryModelMessagePassingTests.cpp
-	vktMemoryModelMessagePassingTests.hpp
 	vktMemoryModelPaddingTests.hpp
 	vktMemoryModelPaddingTests.cpp
+	vktMemoryModelPatternMessagePassingTests.cpp
+	vktMemoryModelPatternMessagePassingTests.hpp
+	vktMemoryModelPatternTestCase.cpp
+	vktMemoryModelPatternTestCase.hpp
+	vktMemoryModelPatternTestInstance.cpp
+	vktMemoryModelPatternTestInstance.hpp
+	vktMemoryModelPatternTransitiveTests.cpp
+	vktMemoryModelPatternTransitiveTests.hpp
 	vktMemoryModelSharedLayoutCase.cpp
 	vktMemoryModelSharedLayoutCase.hpp
 	vktMemoryModelSharedLayoutTests.cpp
