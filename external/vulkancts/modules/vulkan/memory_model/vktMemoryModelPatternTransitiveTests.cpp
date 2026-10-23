@@ -75,9 +75,9 @@ protected:
 
 MemoryModelMessagePassingTransitiveTestCase::MemoryModelMessagePassingTransitiveTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
     : MemoryModelGlTestCase(context, name, {
-          { "payload", data.payloadSC, data.dataType, (data.coherent ? MEM_WORKGROUP : MEM_NONPRIVATE), data.payloadMemLocal, false },
-          { "guard", data.guardSC, data.dataType, MEM_NONE, data.guardMemLocal, false },
-          { "fail", SC_BUFFER, DATA_TYPE_UINT, MEM_NONE, true, false },
+          { "payload", data.payloadSC, data.dataType, (data.coherent ? MEM_WORKGROUP : MEM_NONPRIVATE), data.payloadMemLocal },
+          { "guard", data.guardSC, data.dataType, MEM_NONE, data.guardMemLocal },
+          { "fail", SC_BUFFER, DATA_TYPE_UINT, MEM_NONE, true },
       })
     , m_data(data)
 {
@@ -97,11 +97,8 @@ void MemoryModelMessagePassingTransitiveTestCase::checkSupport(Context &context)
     if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModelAvailabilityVisibilityChains)
         TCU_THROW(NotSupportedError, "vulkanMemoryModelAvailabilityVisibilityChains not supported");
 
-    if ((m_data.payloadSC == SC_PHYSBUFFER || m_data.guardSC == SC_PHYSBUFFER) &&
-        !context.isBufferDeviceAddressSupported())
-        TCU_THROW(NotSupportedError, "Physical storage buffer pointers not supported");
-
-    checkSupportMemoryType(context);
+    checkSupportBuffers(context);
+    checkSupportBufferAtomics(context, "guard");
 }
 
 void MemoryModelMessagePassingTransitiveTestCase::initPrograms(SourceCollections &programCollection) const
@@ -148,16 +145,7 @@ void MemoryModelMessagePassingTransitiveTestCase::initPrograms(SourceCollections
 
 TestInstance *MemoryModelMessagePassingTransitiveTestCase::createInstance(Context &context) const
 {
-    InstanceCaseDef i_data = {
-        m_data.payloadMemLocal,
-        m_data.guardMemLocal,
-        m_data.payloadSC,
-        m_data.guardSC,
-        false,
-        STAGE_COMPUTE,
-        m_data.dataType,
-    };
-    return new MemoryModelTestInstance(context, i_data);
+    return new MemoryModelTestInstance(context, STAGE_COMPUTE, m_buffers);
 }
 
 class MemoryModelMp3TestCase : public MemoryModelMessagePassingTransitiveTestCase
@@ -175,8 +163,10 @@ protected:
         const uint32_t semAcq = SEM_ACQUIRE | semPayload | SEM_VISIBLE;
         const uint32_t semAcqRel = SEM_ACQUIRE_RELEASE | semPayload;
 
-        const bool isIntType = m_data.dataType == DATA_TYPE_UINT || m_data.dataType == DATA_TYPE_UINT64;
-        const char *initValue = isIntType ? "bufferCoord + (init0>>31)" : "bufferCoord + (floatBitsToInt(float(init0))>>31)";
+        const DataType type = getBuffer("payload").type;
+        const char *initValue = (type == DATA_TYPE_UINT || type == DATA_TYPE_UINT64) ?
+                                "bufferCoord + (init0>>31)" :
+                                "bufferCoord + (floatBitsToInt(float(init0))>>31)";
 
         css << "   " << gl_type("payload") << " init0 = " << gl_load("payload", "payloadPartnerCoord") << ";\n"
             << "   " << gl_store("payload", "payloadCoord", initValue) << ";\n"
@@ -220,9 +210,10 @@ protected:
         // Additional SEM_SHARED semantics orders accesses to sharedSkip
         const uint32_t semAcqRel = SEM_ACQUIRE_RELEASE | semPayload | SEM_SHARED;
 
-        const bool     isIntType         = m_data.dataType == DATA_TYPE_UINT || m_data.dataType == DATA_TYPE_UINT64;
-        const char    *initValue         = isIntType ? "bufferCoord + (init0>>31)"
-                                                     : "bufferCoord + (floatBitsToInt(float(init0))>>31)";
+        const DataType type = getBuffer("payload").type;
+        const char *initValue = (type == DATA_TYPE_UINT || type == DATA_TYPE_UINT64) ?
+                                "bufferCoord + (init0>>31)" :
+                                "bufferCoord + (floatBitsToInt(float(init0))>>31)";
 
         css << "   " << gl_type("payload") << " init0 = " << gl_load("payload", "payloadPartnerCoord") << ";\n"
             << "   " << gl_store("payload", "payloadCoord", initValue) << ";\n"

@@ -33,6 +33,7 @@
 #include "vkBuilderUtil.hpp"
 #include "vktTestCase.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 namespace vkt::MemoryModel
@@ -95,9 +96,9 @@ private:
 
 MemoryModelPatternBaseTestCase::MemoryModelPatternBaseTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
     : MemoryModelGlTestCase(context, name, {
-          { "payload", data.payloadSC, data.dataType, getMemQualifier(data), data.payloadMemLocal, false },
-          { "guard", data.guardSC, data.dataType, MEM_NONE, data.guardMemLocal, data.syncType == ST_CONTROL_AND_MEMORY_BARRIER || data.syncType == ST_CONTROL_BARRIER },
-          { "fail", SC_BUFFER, DATA_TYPE_UINT, MEM_NONE, true, false },
+          { "payload", data.payloadSC, data.dataType, getMemQualifier(data), data.payloadMemLocal },
+          { "guard", data.guardSC, data.dataType, data.guardSC == SC_IMAGE ? getMemQualifier(data) : MEM_NONE, data.guardMemLocal },
+          { "fail", SC_BUFFER, DATA_TYPE_UINT, MEM_NONE, true },
       })
     , m_data(data)
 {
@@ -118,29 +119,21 @@ void MemoryModelPatternBaseTestCase::checkSupport(Context &context) const
     }
 
     if (isSplitBarrier(m_data.syncType))
-        checkSupportSplitBarrier(context, m_data.stage);
+        checkSupportStageSplitBarriers(context, m_data.stage);
 
     if (m_data.scope == SCOPE_SUBGROUP)
-        checkSupportSubgroups(context, m_data.stage);
+        checkSupportStageSubgroupFeatures(context, m_data.stage);
 
-    checkSupportAtomicsDataType(context, m_data.dataType, m_data.guardSC);
-    if (m_data.dataType == DATA_TYPE_FLOAT64 && m_data.payloadSC == SC_IMAGE)
-        TCU_THROW(NotSupportedError,
-            "VkShaderAtomicFloat64: 64-bit floating point image atomic operations not supported");
-
-    if ((m_data.payloadSC == SC_PHYSBUFFER || m_data.guardSC == SC_PHYSBUFFER) &&
-        !context.isBufferDeviceAddressSupported())
-        TCU_THROW(NotSupportedError, "Physical storage buffer pointers not supported");
-
-    checkSupportAtomicsStage(context, m_data.stage);
-    checkSupportMemoryType(context);
+    checkSupportBuffers(context);
+    checkSupportBufferAtomics(context, "guard");
+    checkSupportStageAtomics(context, m_data.stage);
 }
 
 void MemoryModelPatternBaseTestCase::initPrograms(SourceCollections &programCollection) const
 {
     const Scope mappingScope = getMappingScope(m_data);
-    const bool floatType = m_data.dataType == DATA_TYPE_FLOAT32 || m_data.dataType == DATA_TYPE_FLOAT64;
     const bool splitBarrier = isSplitBarrier(m_data.syncType);
+    const bool hasFloats = any_of(m_buffers.cbegin(), m_buffers.cend(), [](BufferDef b) { return b.type == DATA_TYPE_FLOAT32 || b.type == DATA_TYPE_FLOAT64; });
 
     std::stringstream css;
     css << "#version 450 core\n";
@@ -148,7 +141,7 @@ void MemoryModelPatternBaseTestCase::initPrograms(SourceCollections &programColl
     {
         css << "#pragma use_vulkan_memory_model\n";
     }
-    if (floatType)
+    if (hasFloats)
     {
         css << "#extension GL_EXT_shader_atomic_float : enable\n";
     }
@@ -232,16 +225,7 @@ void MemoryModelPatternBaseTestCase::initPrograms(SourceCollections &programColl
 
 TestInstance *MemoryModelPatternBaseTestCase::createInstance(Context &context) const
 {
-    InstanceCaseDef i_data = {
-        m_data.payloadMemLocal,
-        m_data.guardMemLocal,
-        m_data.payloadSC,
-        m_data.guardSC,
-        m_data.syncType == ST_CONTROL_AND_MEMORY_BARRIER || m_data.syncType == ST_CONTROL_BARRIER,
-        m_data.stage,
-        m_data.dataType,
-    };
-    return new MemoryModelTestInstance(context, i_data);
+    return new MemoryModelTestInstance(context, m_data.stage, m_buffers);
 }
 
 void MemoryModelPatternBaseTestCase::initSyncPair(std::stringstream &css, uint32_t semAv, uint32_t semVis) const
@@ -355,9 +339,11 @@ protected:
     {
         const uint32_t semAv  = m_data.coherent ? 0u : uint32_t(SEM_AVAILABLE);
         const uint32_t semVis = m_data.coherent ? 0u : uint32_t(SEM_VISIBLE);
-        const bool isIntType  = m_data.dataType == DATA_TYPE_UINT || m_data.dataType == DATA_TYPE_UINT64;
-        const char *initValue = isIntType ? "bufferCoord + (init0>>31)"
-                                          : "bufferCoord + (floatBitsToInt(float(init0))>>31)";
+
+        const DataType type = getBuffer("payload").type;
+        const char *initValue = (type == DATA_TYPE_UINT || type == DATA_TYPE_UINT64) ?
+                                "bufferCoord + (init0>>31)" :
+                                "bufferCoord + (floatBitsToInt(float(init0))>>31)";
         css << "   " << gl_type("payload") << " init0 = " << gl_load("payload", "payloadPartnerCoord") << ";\n"
             << "   " << gl_store("payload", "payloadCoord", initValue) << ";\n";
         initSyncPair(css, semAv, semVis);

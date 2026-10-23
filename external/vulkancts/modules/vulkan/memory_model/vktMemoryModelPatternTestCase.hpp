@@ -4,6 +4,8 @@
  * Vulkan Conformance Tests
  * ------------------------
  *
+ * Copyright (c) 2017-2019 The Khronos Group Inc.
+ * Copyright (c) 2018-2019 NVIDIA Corporation
  * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -67,14 +69,14 @@ enum Scope
 
 enum Semantics
 {
-    SEM_ACQUIRE = 0x2,
-    SEM_RELEASE = 0x4,
+    SEM_ACQUIRE         = 0x2,
+    SEM_RELEASE         = 0x4,
     SEM_ACQUIRE_RELEASE = 0x8,
-    SEM_BUFFER = 0x40,
-    SEM_SHARED = 0x100,
-    SEM_IMAGE = 0x800,
-    SEM_AVAILABLE = 0x2000,
-    SEM_VISIBLE = 0x4000,
+    SEM_BUFFER          = 0x40,
+    SEM_SHARED          = 0x100,
+    SEM_IMAGE           = 0x800,
+    SEM_AVAILABLE       = 0x2000,
+    SEM_VISIBLE         = 0x4000,
 };
 
 enum Stage
@@ -97,12 +99,11 @@ enum GlMemQualifier
 
 struct BufferDef
 {
-    const char* name;
+    const char *name;
     StorageClass sc;
     DataType type;
     GlMemQualifier memqual;
     bool local;
-    bool skip;
 };
 
 class MemoryModelTestCase : public TestCase
@@ -117,12 +118,12 @@ public:
     }
 
 protected:
-    virtual void checkSupportAtomicsDataType(const Context &context, DataType type, const StorageClass sc) const;
-    virtual void checkSupportAtomicsStage(const Context &context, Stage stage) const;
-    virtual void checkSupportSubgroups(const Context &context, Stage stage) const;
-    virtual void checkSupportSplitBarrier(const Context &context, Stage stage) const;
-    virtual void checkSupportMemoryType(const Context &context) const;
-    virtual const BufferDef& getBuffer(const char *name) const;
+    virtual void checkSupportBuffers(const Context &context) const;
+    virtual void checkSupportBufferAtomics(const Context &context, const char *name) const;
+    virtual void checkSupportStageAtomics(const Context &context, Stage stage) const;
+    virtual void checkSupportStageSubgroupFeatures(const Context &context, Stage stage) const;
+    virtual void checkSupportStageSplitBarriers(const Context &context, Stage stage) const;
+    virtual const BufferDef &getBuffer(const char *name) const;
     virtual uint32_t getBufferSemantics(const char *name) const;
     std::vector<BufferDef> m_buffers;
     std::unordered_map<std::string_view, std::size_t> m_bufferIndices;

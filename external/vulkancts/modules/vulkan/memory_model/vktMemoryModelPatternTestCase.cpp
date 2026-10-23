@@ -2,6 +2,8 @@
  * Vulkan Conformance Tests
  * ------------------------
  *
+ * Copyright (c) 2017-2019 The Khronos Group Inc.
+ * Copyright (c) 2018-2019 NVIDIA Corporation
  * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,40 +35,82 @@ namespace MemoryModel
 {
 using namespace vk;
 
-void MemoryModelTestCase::checkSupportAtomicsDataType(const Context &context, const DataType type, const StorageClass sc) const
+void MemoryModelTestCase::checkSupportBuffers(const Context &context) const
 {
-    switch(type) {
+    bool hasInt64      = false;
+    bool hasPhysBuffer = false;
+
+    for (const auto &buffer : m_buffers)
+    {
+        if (buffer.type == DATA_TYPE_FLOAT64 && buffer.sc == SC_IMAGE)
+        {
+            TCU_THROW(NotSupportedError,
+                      "VkShaderAtomicFloat64: 64-bit floating point image atomic operations not supported");
+        }
+        hasInt64 |= (buffer.type == DATA_TYPE_UINT64);
+        hasPhysBuffer |= (buffer.sc == SC_PHYSBUFFER);
+    }
+
+    if (hasPhysBuffer && !context.isBufferDeviceAddressSupported())
+        TCU_THROW(NotSupportedError, "Physical storage buffer pointers not supported");
+
+    if (hasInt64 && !context.getDeviceFeatures().shaderInt64)
+        TCU_THROW(NotSupportedError, "64-bit integer in shaders not supported");
+
+    const auto &vki       = context.getInstanceInterface();
+    const auto physDevice = context.getPhysicalDevice();
+    const bool isDevAddrSupported =
+        hasPhysBuffer && context.isDeviceFunctionalitySupported("VK_KHR_buffer_device_address");
+
+    const VkPhysicalDeviceMemoryProperties properties = getPhysicalDeviceMemoryProperties(vki, physDevice);
+
+    for (const auto &buffer : m_buffers)
+    {
+        if (buffer.sc != SC_BUFFER && buffer.sc != SC_PHYSBUFFER)
+            continue;
+
+        const bool isDeviceAddr        = isDevAddrSupported && (buffer.sc == SC_PHYSBUFFER);
+        const MemoryRequirement memReq = (isDeviceAddr ? MemoryRequirement::DeviceAddress : MemoryRequirement::Any) |
+                                         (buffer.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal);
+        if (getCompatibleMemoryTypes(properties, memReq) == 0)
+            TCU_THROW(NotSupportedError, "Test variant uses memory type which is not supported");
+    }
+}
+
+void MemoryModelTestCase::checkSupportBufferAtomics(const Context &context, const char *name) const
+{
+    const BufferDef &buffer = getBuffer(name);
+
+    switch (buffer.type)
+    {
     case DATA_TYPE_UINT64:
-        if (!context.getDeviceFeatures().shaderInt64)
-            TCU_THROW(NotSupportedError, "64-bit integer in shaders not supported");
-        if ((sc == SC_BUFFER || sc == SC_PHYSBUFFER) &&
-             !context.getShaderAtomicInt64Features().shaderBufferInt64Atomics)
+        if ((buffer.sc == SC_BUFFER || buffer.sc == SC_PHYSBUFFER) &&
+            !context.getShaderAtomicInt64Features().shaderBufferInt64Atomics)
             TCU_THROW(NotSupportedError, "64-bit integer buffer atomics not supported");
-        if (sc == SC_WORKGROUP && !context.getShaderAtomicInt64Features().shaderSharedInt64Atomics)
+        if (buffer.sc == SC_WORKGROUP && !context.getShaderAtomicInt64Features().shaderSharedInt64Atomics)
             TCU_THROW(NotSupportedError, "64-bit integer shared atomics not supported");
         break;
 
     case DATA_TYPE_FLOAT32:
         if (!context.isDeviceFunctionalitySupported("VK_EXT_shader_atomic_float"))
             TCU_THROW(NotSupportedError, "Missing extension: VK_EXT_shader_atomic_float");
-        if ((sc == SC_BUFFER || sc == SC_PHYSBUFFER) &&
-            (!context.getShaderAtomicFloatFeaturesEXT().shaderBufferFloat32Atomics))
+        if ((buffer.sc == SC_BUFFER || buffer.sc == SC_PHYSBUFFER) &&
+            !context.getShaderAtomicFloatFeaturesEXT().shaderBufferFloat32Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat32: 32-bit floating point buffer atomics not supported");
-        if (sc == SC_IMAGE && (!context.getShaderAtomicFloatFeaturesEXT().shaderImageFloat32Atomics))
+        if (buffer.sc == SC_IMAGE && !context.getShaderAtomicFloatFeaturesEXT().shaderImageFloat32Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat32: 32-bit floating point image atomics not supported");
-        if (sc == SC_WORKGROUP && (!context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat32Atomics))
+        if (buffer.sc == SC_WORKGROUP && !context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat32Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat32: 32-bit floating point shared atomics not supported");
         break;
 
     case DATA_TYPE_FLOAT64:
         if (!context.isDeviceFunctionalitySupported("VK_EXT_shader_atomic_float"))
             TCU_THROW(NotSupportedError, "Missing extension: VK_EXT_shader_atomic_float");
-        if ((sc == SC_BUFFER || sc == SC_PHYSBUFFER) &&
-            (!context.getShaderAtomicFloatFeaturesEXT().shaderBufferFloat64Atomics))
+        if ((buffer.sc == SC_BUFFER || buffer.sc == SC_PHYSBUFFER) &&
+            !context.getShaderAtomicFloatFeaturesEXT().shaderBufferFloat64Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat64: 64-bit floating point buffer atomics not supported");
-        if (sc == SC_IMAGE)
-            TCU_THROW(NotSupportedError, "VkShaderAtomicFloat64: 64-bit floating point image atomics not supported");
-        if (sc == SC_WORKGROUP && (!context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat64Atomics))
+        // DATA_TYPE_FLOAT64 with SC_IMAGE is rejected in checkSupportBuffers
+        if (buffer.sc == SC_WORKGROUP && !context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat64Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat64: 64-bit floating point shared atomics not supported");
         break;
 
@@ -75,29 +119,19 @@ void MemoryModelTestCase::checkSupportAtomicsDataType(const Context &context, co
     }
 }
 
-void MemoryModelTestCase::checkSupportAtomicsStage(const Context &context, const Stage stage) const
+void MemoryModelTestCase::checkSupportStageAtomics(const Context &context, const Stage stage) const
 {
-    switch(stage) {
-    case STAGE_VERTEX:
-        if (!context.getDeviceFeatures().vertexPipelineStoresAndAtomics)
-            TCU_THROW(NotSupportedError, "vertexPipelineStoresAndAtomics not supported");
-        break;
-
-    case STAGE_FRAGMENT:
-        if (!context.getDeviceFeatures().fragmentStoresAndAtomics)
-            TCU_THROW(NotSupportedError, "fragmentStoresAndAtomics not supported");
-        break;
-
-    default:
-        break;
-    }
+    if (stage == STAGE_VERTEX && !context.getDeviceFeatures().vertexPipelineStoresAndAtomics)
+        TCU_THROW(NotSupportedError, "vertexPipelineStoresAndAtomics not supported");
+    if (stage == STAGE_FRAGMENT && !context.getDeviceFeatures().fragmentStoresAndAtomics)
+        TCU_THROW(NotSupportedError, "fragmentStoresAndAtomics not supported");
 }
 
-void MemoryModelTestCase::checkSupportSubgroups(const Context &context, const Stage stage) const
+void MemoryModelTestCase::checkSupportStageSubgroupFeatures(const Context &context, const Stage stage) const
 {
     VkPhysicalDeviceSubgroupProperties subgroupProperties;
-    subgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    subgroupProperties.pNext  = nullptr;
+    subgroupProperties.sType               = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    subgroupProperties.pNext               = nullptr;
     subgroupProperties.supportedOperations = 0;
 
     VkPhysicalDeviceProperties2 properties;
@@ -123,37 +157,23 @@ void MemoryModelTestCase::checkSupportSubgroups(const Context &context, const St
         TCU_THROW(NotSupportedError, "Device does not support subgroup operations for this stage");
 }
 
-void MemoryModelTestCase::checkSupportSplitBarrier(const Context &context, const Stage stage) const
+void MemoryModelTestCase::checkSupportStageSplitBarriers(const Context &context, const Stage stage) const
 {
     if (stage != STAGE_COMPUTE)
         TCU_THROW(NotSupportedError, "VK_EXT_shader_split_barrier is only supported in compute shaders");
 
 #ifndef CTS_USES_VULKANSC
     if (!context.getShaderSplitBarrierFeaturesEXT().shaderSplitBarrier)
-#endif
         TCU_THROW(NotSupportedError, "shaderSplitBarrier feature not supported");
+#else
+    DE_UNREF(context);
+    TCU_THROW(NotSupportedError, "shaderSplitBarrier feature not supported");
+#endif
 }
 
-void MemoryModelTestCase::checkSupportMemoryType(const Context &context) const
+const BufferDef &MemoryModelTestCase::getBuffer(const char *name) const
 {
-    const auto &vki               = context.getInstanceInterface();
-    auto physDevice               = context.getPhysicalDevice();
-    bool isDeviceAddressSupported = context.isDeviceFunctionalitySupported("VK_KHR_buffer_device_address");
-    const VkPhysicalDeviceMemoryProperties memoryProperties = getPhysicalDeviceMemoryProperties(vki, physDevice);
-    for (const auto &buffer : m_buffers) {
-        if (buffer.sc != SC_BUFFER && buffer.sc != SC_PHYSBUFFER)
-            continue;
-        bool memoryDeviceAddress = isDeviceAddressSupported && (buffer.sc == SC_PHYSBUFFER);
-        MemoryRequirement memReq = (memoryDeviceAddress ? MemoryRequirement::DeviceAddress : MemoryRequirement::Any) |
-                                   (buffer.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal);
-        if (getCompatibleMemoryTypes(memoryProperties, memReq) == 0)
-            TCU_THROW(NotSupportedError, "Test variant uses memory type which is not supported");
-    }
-}
-
-const BufferDef& MemoryModelTestCase::getBuffer(const char *name) const
-{
-    auto it = m_bufferIndices.find(name);
+    const auto it = m_bufferIndices.find(name);
     DE_ASSERT(it != m_bufferIndices.end());
     return m_buffers[it->second];
 }
@@ -397,8 +417,6 @@ StreamOp MemoryModelGlTestCase::gl_layout() const
         for (size_t i = 0; i < m_buffers.size(); i++)
         {
             auto buffer = m_buffers[i];
-            if (buffer.skip)
-                continue;
             bool intType = buffer.type == DATA_TYPE_UINT || buffer.type == DATA_TYPE_UINT64;
             switch (buffer.sc)
             {
@@ -427,7 +445,7 @@ StreamOp MemoryModelGlTestCase::gl_layout() const
             os << "layout (push_constant, std430) uniform PC {\n";
             for (size_t i = 0; i < m_buffers.size(); i++)
             {
-                if (m_buffers[i].sc == SC_PHYSBUFFER && !m_buffers[i].skip)
+                if (m_buffers[i].sc == SC_PHYSBUFFER)
                 {
                     const char *suffix = m_buffers[i].memqual == MEM_NONE ? "" : "ref";
                     os << "layout(offset = " << (i * 8) << ") T" << m_buffers[i].name << "Ref " << m_buffers[i].name << suffix << ";\n";
