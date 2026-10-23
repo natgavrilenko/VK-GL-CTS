@@ -571,7 +571,9 @@ tcu::TestCaseGroup *createPairPatternTests(tcu::TestContext &testCtx, const char
                                                 // No support for control/split barrier with larger than workgroup scope, or non-compute stages
                                                 if ((c.syncType == ST_CONTROL_BARRIER ||
                                                      c.syncType == ST_CONTROL_AND_MEMORY_BARRIER ||
-                                                     isSplitBarrier(c.syncType)) &&
+                                                     c.syncType == ST_SPLIT_CONTROL_BARRIER ||
+                                                     c.syncType == ST_SPLIT_CONTROL_AND_MEMORY_BARRIER ||
+                                                     c.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER) &&
                                                     (c.scope == SCOPE_DEVICE || c.scope == SCOPE_QUEUEFAMILY ||
                                                      c.stage != STAGE_COMPUTE))
                                                 {
@@ -614,7 +616,10 @@ tcu::TestCaseGroup *createPairPatternTests(tcu::TestContext &testCtx, const char
                                                 }
                                                 // Control barrier tests don't use a guard variable, so only run them with gsc,gl==0
                                                 if ((c.syncType == ST_CONTROL_BARRIER ||
-                                                     c.syncType == ST_CONTROL_AND_MEMORY_BARRIER) &&
+                                                     c.syncType == ST_CONTROL_AND_MEMORY_BARRIER ||
+                                                     c.syncType == ST_SPLIT_CONTROL_BARRIER ||
+                                                     c.syncType == ST_SPLIT_CONTROL_AND_MEMORY_BARRIER ||
+                                                     c.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER) &&
                                                     (c.guardSC != 0 || c.guardMemLocal != 0))
                                                 {
                                                     continue;
