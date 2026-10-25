@@ -161,6 +161,7 @@ protected:
     StreamOp gl_load(const char *name, const char* idx) const;
     StreamOp gl_store(const char *name, const char* idx, const char* value) const;
     StreamOp gl_layout() const;
+    StreamOp gl_layoutStructs() const;
     StreamOp gl_layoutReferences() const;
     StreamOp gl_layoutBufferCoordinates() const;
     StreamOp gl_layoutBufferCoordinates00() const;

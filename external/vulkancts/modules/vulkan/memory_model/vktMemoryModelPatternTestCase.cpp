@@ -434,7 +434,7 @@ StreamOp MemoryModelGlTestCase::gl_layout() const
                     os << "layout(set=0, binding=" << i << ", r32f) uniform " << gl_memqual(buffer.memqual) << " image2D " << buffer.name << ";\n";
                 break;
             case SC_WORKGROUP:
-                os << "shared S " << buffer.name << ";\n";
+                os << "shared S" << buffer.name << " " << buffer.name << ";\n";
                 break;
             default:
                 DE_ASSERT(0);
@@ -452,6 +452,17 @@ StreamOp MemoryModelGlTestCase::gl_layout() const
                 }
             }
             os << "};\n";
+        }
+    };
+}
+
+StreamOp MemoryModelGlTestCase::gl_layoutStructs() const
+{
+    return [=](std::ostream &os) {
+        for (const auto &buffer : m_buffers)
+        {
+            if (buffer.sc == SC_WORKGROUP)
+                os << "struct S" << buffer.name << " { " << gl_type(buffer.type) << " x[DIM*DIM]; };\n";
         }
     };
 }

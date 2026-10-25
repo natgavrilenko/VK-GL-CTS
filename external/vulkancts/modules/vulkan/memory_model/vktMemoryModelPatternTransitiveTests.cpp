@@ -116,7 +116,8 @@ void MemoryModelMessagePassingTransitiveTestCase::initPrograms(SourceCollections
            "layout(constant_id = 0) const int DIM = 1;\n"
            "layout(constant_id = 1) const int NUM_WORKGROUP_EACH_DIM = 1;\n"
            "shared bool sharedSkip;\n"
-           "layout(local_size_x_id = 0, local_size_y_id = 0, local_size_z = 1) in;\n"
+        << gl_layoutStructs()
+        << "layout(local_size_x_id = 0, local_size_y_id = 0, local_size_z = 1) in;\n"
         << gl_layout()
         << "void main()\n"
            "{\n"

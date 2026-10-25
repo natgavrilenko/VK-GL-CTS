@@ -91,7 +91,7 @@ protected:
 
 private:
     static GlMemQualifier getMemQualifier(const CaseDef &data);
-    static Scope getMappingScope(const CaseDef &data);
+    Scope getMappingScope() const;
 };
 
 MemoryModelPatternBaseTestCase::MemoryModelPatternBaseTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
@@ -131,7 +131,7 @@ void MemoryModelPatternBaseTestCase::checkSupport(Context &context) const
 
 void MemoryModelPatternBaseTestCase::initPrograms(SourceCollections &programCollection) const
 {
-    const Scope mappingScope = getMappingScope(m_data);
+    const Scope mappingScope = getMappingScope();
     const bool splitBarrier = isSplitBarrier(m_data.syncType);
     const bool hasFloats = std::any_of(m_buffers.cbegin(), m_buffers.cend(), [](BufferDef b) { return b.type == DATA_TYPE_FLOAT32 || b.type == DATA_TYPE_FLOAT64; });
 
@@ -158,7 +158,7 @@ void MemoryModelPatternBaseTestCase::initPrograms(SourceCollections &programColl
            "// DIM/NUM_WORKGROUP_EACH_DIM overriden by spec constants\n"
            "layout(constant_id = 0) const int DIM = 1;\n"
            "layout(constant_id = 1) const int NUM_WORKGROUP_EACH_DIM = 1;\n"
-           "struct S { " << gl_type("payload") << " x[DIM*DIM]; };\n";
+        << gl_layoutStructs();
 
     if (m_data.stage == STAGE_COMPUTE)
     {
@@ -313,14 +313,15 @@ GlMemQualifier MemoryModelPatternBaseTestCase::getMemQualifier(const CaseDef &da
     }
 }
 
-Scope MemoryModelPatternBaseTestCase::getMappingScope(const CaseDef &data)
+Scope MemoryModelPatternBaseTestCase::getMappingScope() const
 {
-    if ((data.scope == SCOPE_DEVICE || data.scope == SCOPE_QUEUEFAMILY)
-        && (data.payloadSC == SC_WORKGROUP || data.guardSC == SC_WORKGROUP))
+    const bool hasSharedBuffer = std::any_of(m_buffers.cbegin(), m_buffers.cend(),
+                                             [](const BufferDef &buffer) { return buffer.sc == SC_WORKGROUP; });
+    if ((m_data.scope == SCOPE_DEVICE || m_data.scope == SCOPE_QUEUEFAMILY) && hasSharedBuffer)
     {
         return SCOPE_WORKGROUP;
     }
-    return data.scope;
+    return m_data.scope;
 }
 
 class MemoryModelMessagePassingTestCase : public MemoryModelPatternBaseTestCase
