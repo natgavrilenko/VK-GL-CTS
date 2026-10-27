@@ -25,6 +25,7 @@
 #include "vktMemoryModelAmberTests.hpp"
 #include "vktMemoryModelPaddingTests.hpp"
 #include "vktMemoryModelPatternMessagePassingTests.hpp"
+#include "vktMemoryModelPatternMixedAccessTests.hpp"
 #include "vktMemoryModelPatternTransitiveTests.hpp"
 #include "vktMemoryModelSharedLayoutTests.hpp"
 
@@ -44,6 +45,7 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const std::string &na
     group->addChild(createMessagePassingTests(testCtx));
     group->addChild(createLoadBufferTests(testCtx));
     group->addChild(createTransitiveTests(testCtx));
+    group->addChild(createMixedAccessTests(testCtx));
     group->addChild(createPaddingTests(testCtx));
     group->addChild(createSharedMemoryLayoutTests(testCtx));
 

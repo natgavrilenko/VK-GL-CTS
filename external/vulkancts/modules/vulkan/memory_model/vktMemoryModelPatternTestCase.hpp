@@ -168,12 +168,12 @@ protected:
     StreamOp gl_layoutInitSharedMemory(Scope scope) const;
     const char *gl_type(const char *name) const;
     static const char *gl_type(DataType type);
+    static const char *gl_scope(Scope scope);
 
 private:
     static constexpr uint32_t GL_SEM1 = SEM_BUFFER | SEM_IMAGE | SEM_SHARED;
     static constexpr uint32_t GL_SEM2 = SEM_ACQUIRE | SEM_RELEASE | SEM_ACQUIRE_RELEASE | SEM_AVAILABLE | SEM_VISIBLE;
     static const char *gl_memqual(GlMemQualifier qualifier);
-    static const char *gl_scope(Scope scope);
     template <std::size_t N>
     static StreamOp formatSemantics(uint32_t value, const std::pair<uint32_t, const char *> (&mappings)[N]);
     static StreamOp gl_semantics1(uint32_t value);
