@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <vector>
 
 namespace vkt::MemoryModel
 {
@@ -90,18 +91,65 @@ protected:
     CaseDef m_data;
 
 private:
+    static std::vector<BufferDef> createBuffers(const CaseDef &data);
     static GlMemQualifier getMemQualifier(const CaseDef &data);
+    static bool hasGuard(const CaseDef &data);
     Scope getMappingScope() const;
 };
 
 MemoryModelPatternBaseTestCase::MemoryModelPatternBaseTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelGlTestCase(context, name, {
-          { "payload", data.payloadSC, data.dataType, getMemQualifier(data), data.payloadMemLocal },
-          { "guard", data.guardSC, data.dataType, data.guardSC == SC_IMAGE ? getMemQualifier(data) : MEM_NONE, data.guardMemLocal },
-          { "fail", SC_BUFFER, DATA_TYPE_UINT, MEM_NONE, true },
-      })
-    , m_data(data)
+    : MemoryModelGlTestCase(context, name, createBuffers(data)), m_data(data)
 {
+}
+
+std::vector<BufferDef> MemoryModelPatternBaseTestCase::createBuffers(const CaseDef &data)
+{
+    GlMemQualifier payloadQualifier = getMemQualifier(data);
+    if (hasGuard(data))
+    {
+        GlMemQualifier guardQualifier = data.guardSC == SC_IMAGE ? payloadQualifier : MEM_NONE;
+        return std::vector<BufferDef>{
+            { "payload", data.payloadSC, data.dataType, payloadQualifier, data.payloadMemLocal },
+            { "guard", data.guardSC, data.dataType, guardQualifier, data.guardMemLocal },
+            { "fail", SC_BUFFER, DATA_TYPE_UINT, MEM_NONE, true }
+        };
+    }
+    else
+    {
+        return std::vector<BufferDef>{
+            { "payload", data.payloadSC, data.dataType, payloadQualifier, data.payloadMemLocal },
+            { "fail", SC_BUFFER, DATA_TYPE_UINT, MEM_NONE, true }
+        };
+    }
+}
+
+GlMemQualifier MemoryModelPatternBaseTestCase::getMemQualifier(const CaseDef &data)
+{
+    if (data.core11)
+        return MEM_COHERENT;
+    if (!data.coherent)
+        return MEM_NONPRIVATE;
+    switch (data.scope)
+    {
+        case SCOPE_DEVICE:
+            return MEM_DEVICE;
+        case SCOPE_QUEUEFAMILY:
+            return MEM_QUEUEFAMILY;
+        case SCOPE_WORKGROUP:
+            return MEM_WORKGROUP;
+        case SCOPE_SUBGROUP:
+            return MEM_SUBGROUP;
+        default:
+            DE_ASSERT(0);
+            return MEM_NONE;
+    }
+}
+
+bool MemoryModelPatternBaseTestCase::hasGuard(const CaseDef &data)
+{
+    return data.syncType == ST_FENCE_FENCE || data.syncType == ST_FENCE_ATOMIC ||
+           data.syncType == ST_ATOMIC_FENCE || data.syncType == ST_ATOMIC_ATOMIC ||
+           data.syncType == ST_ATOMIC_EXCHANGE_ATOMIC_EXCHANGE;
 }
 
 void MemoryModelPatternBaseTestCase::checkSupport(Context &context) const
@@ -125,7 +173,8 @@ void MemoryModelPatternBaseTestCase::checkSupport(Context &context) const
         checkSupportStageSubgroupFeatures(context, m_data.stage);
 
     checkSupportBuffers(context);
-    checkSupportBufferAtomics(context, "guard");
+    if (hasGuard(m_data))
+        checkSupportBufferAtomics(context, "guard");
     checkSupportStageAtomics(context, m_data.stage);
 }
 
@@ -232,7 +281,7 @@ void MemoryModelPatternBaseTestCase::initSyncPair(std::stringstream &css, uint32
 {
     const Scope scope = m_data.scope;
     const uint32_t semPayload = getBufferSemantics("payload");
-    const uint32_t semGuard = getBufferSemantics("guard");
+    const uint32_t semGuard = hasGuard(m_data) ? getBufferSemantics("guard") : 0;
     const uint32_t semRel = SEM_RELEASE | semPayload | semAv;
     const uint32_t semAcq = SEM_ACQUIRE | semPayload | semVis;
     const uint32_t semAcqRel = SEM_ACQUIRE_RELEASE | semPayload | semAv | semVis;
@@ -288,28 +337,6 @@ void MemoryModelPatternBaseTestCase::initSyncPair(std::stringstream &css, uint32
         break;
     default:
         DE_ASSERT(0);
-    }
-}
-
-GlMemQualifier MemoryModelPatternBaseTestCase::getMemQualifier(const CaseDef &data)
-{
-    if (data.core11)
-        return MEM_COHERENT;
-    if (!data.coherent)
-        return MEM_NONPRIVATE;
-    switch (data.scope)
-    {
-        case SCOPE_DEVICE:
-            return MEM_DEVICE;
-        case SCOPE_QUEUEFAMILY:
-            return MEM_QUEUEFAMILY;
-        case SCOPE_WORKGROUP:
-            return MEM_WORKGROUP;
-        case SCOPE_SUBGROUP:
-            return MEM_SUBGROUP;
-        default:
-            DE_ASSERT(0);
-            return MEM_NONE;
     }
 }
 
