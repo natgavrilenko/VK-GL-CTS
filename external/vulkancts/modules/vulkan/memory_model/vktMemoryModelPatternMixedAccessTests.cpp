@@ -28,13 +28,13 @@
 #include "vktMemoryModelPatternTestInstance.hpp"
 
 #include "deDefs.h"
-#include "deSharedPtr.hpp"
 #include "tcuTestCase.hpp"
-#include "vkBuilderUtil.hpp"
 #include "vktTestCase.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace vkt::MemoryModel
@@ -43,6 +43,8 @@ namespace
 {
 using namespace vk;
 
+constexpr uint32_t NO_SCOPE = ~0u;
+
 struct CaseDef
 {
     bool core11;
@@ -50,7 +52,7 @@ struct CaseDef
     StorageClass payloadSC;
     DataType payloadType;
     Scope syncScope;
-    Scope visScope;
+    std::optional<Scope> visScope;
     Stage stage;
 };
 
@@ -86,7 +88,9 @@ GlMemQualifier MemoryModelPatternMixedAccessTestCase::getMemQualifier(const Case
 {
     if (data.core11)
         return MEM_COHERENT;
-    switch (data.visScope)
+    if (!data.visScope)
+        return MEM_NONPRIVATE;
+    switch (*data.visScope)
     {
         case SCOPE_DEVICE:
             return MEM_DEVICE;
@@ -96,8 +100,6 @@ GlMemQualifier MemoryModelPatternMixedAccessTestCase::getMemQualifier(const Case
             return MEM_WORKGROUP;
         case SCOPE_SUBGROUP:
             return MEM_SUBGROUP;
-        case SCOPE_INVOCATION:
-            return MEM_NONPRIVATE;
         default:
             DE_ASSERT(0);
             return MEM_NONE;
@@ -137,6 +139,7 @@ void MemoryModelPatternMixedAccessTestCase::initPrograms(SourceCollections &prog
     const bool hasFloats = std::any_of(m_buffers.cbegin(), m_buffers.cend(), [](BufferDef b) {
         return b.type == DATA_TYPE_FLOAT32 || b.type == DATA_TYPE_FLOAT64;
     });
+    const bool loadIntrinsic = !m_data.core11 && m_data.payloadSC == SC_WORKGROUP;
 
     std::stringstream css;
     css << "#version 450 core\n";
@@ -155,14 +158,13 @@ void MemoryModelPatternMixedAccessTestCase::initPrograms(SourceCollections &prog
            "#extension GL_ARB_gpu_shader_int64 : enable\n"
            "#extension GL_EXT_buffer_reference : enable\n";
 
-    if (!m_data.core11 && m_data.payloadSC == SC_WORKGROUP)
+    if (loadIntrinsic)
     {
-        const bool hasVisibility = m_data.visScope != SCOPE_INVOCATION;
         const bool hasDeviceVisibility = m_data.visScope == SCOPE_DEVICE;
         css << "#extension GL_EXT_spirv_intrinsics : enable\n";
         css << "spirv_instruction(" << (hasDeviceVisibility ? "capabilities = [5346], " : "") << "id = 61) "
             << typeStr << " loadPayload(spirv_by_reference " << typeStr << " p, spirv_literal int memoryAccess"
-            << (hasVisibility ? ", int scope" : "") << ");\n";
+            << (m_data.visScope.has_value() ? ", int scope" : "") << ");\n";
     }
 
     css << "// DIM/NUM_WORKGROUP_EACH_DIM overriden by spec constants\n"
@@ -203,10 +205,10 @@ void MemoryModelPatternMixedAccessTestCase::initPrograms(SourceCollections &prog
         const char *init = hasFloats ? "bufferCoord + 1 + (floatBitsToInt(float(init))>>31)" :
                            "bufferCoord + 1 + (init>>31)";
         std::string loadOperands = "0x20";
-        if (m_data.visScope != SCOPE_INVOCATION)
-            loadOperands = std::string("0x30, ") + gl_scope(m_data.visScope);
+        if (m_data.visScope)
+            loadOperands = std::string("0x30, ") + gl_scope(*m_data.visScope);
 
-        if (!m_data.core11 && m_data.payloadSC == SC_WORKGROUP)
+        if (loadIntrinsic)
             css << "   init = loadPayload(payload.x[payloadPartnerCoord], " << loadOperands << ");\n";
         else
             css << "   init = " << gl_load("payload", "payloadPartnerCoord") << ";\n";
@@ -215,7 +217,7 @@ void MemoryModelPatternMixedAccessTestCase::initPrograms(SourceCollections &prog
             << "   r0 = " << gl_atomicLoad("payload", "payloadPartnerCoord", syncScope, 0) << ";\n"
             << "   if (r0 == " << typeStr << "(partnerBufferCoord + 1)) {\n";
 
-        if (!m_data.core11 && m_data.payloadSC == SC_WORKGROUP)
+        if (loadIntrinsic)
             css << "      r1 = loadPayload(payload.x[payloadPartnerCoord], " << loadOperands << ");\n";
         else
             css << "      r1 = " << gl_load("payload", "payloadPartnerCoord") << ";\n";
@@ -312,7 +314,7 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
     };
 
     static const TestGroupCase visScopeCases[] = {
-        {SCOPE_INVOCATION, "nonprivate"},
+        {NO_SCOPE, "nonprivate"},
         {SCOPE_SUBGROUP, "vissubgroup"},
         {SCOPE_WORKGROUP, "visworkgroup"},
         {SCOPE_QUEUEFAMILY, "visqueuefamily"},
@@ -345,8 +347,12 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
                             new tcu::TestCaseGroup(testCtx, syncScopeCases[syncScopeNdx].name));
                         for (int visScopeNdx = 0; visScopeNdx < DE_LENGTH_OF_ARRAY(visScopeCases); visScopeNdx++)
                         {
+                            const bool legacyCoherent = core11Cases[core11Ndx].value && visScopeCases[visScopeNdx].value == NO_SCOPE;
+                            std::optional<Scope> visScope = std::nullopt;
+                            if (visScopeCases[visScopeNdx].value != NO_SCOPE)
+                                visScope = static_cast<Scope>(visScopeCases[visScopeNdx].value);
                             de::MovePtr<tcu::TestCaseGroup> visScopeGroup(
-                                new tcu::TestCaseGroup(testCtx, visScopeCases[visScopeNdx].name));
+                                new tcu::TestCaseGroup(testCtx, legacyCoherent ? "coherent" : visScopeCases[visScopeNdx].name));
                             for (int stageNdx = 0; stageNdx < DE_LENGTH_OF_ARRAY(stageCases); stageNdx++)
                             {
                                 CaseDef c = {
@@ -355,7 +361,7 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
                                     (StorageClass)scCases[scNdx].value,         // StorageClass payloadSC;
                                     (DataType)typeCases[typeNdx].value,         // DataType payloadType;
                                     (Scope)syncScopeCases[syncScopeNdx].value,  // Scope syncScope;
-                                    (Scope)visScopeCases[visScopeNdx].value,    // Scope visScope;
+                                    visScope,                                   // std::optional<Scope> visScope;
                                     (Stage)stageCases[stageNdx].value,          // Stage stage;
                                 };
 
@@ -365,7 +371,7 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
                                 // Vulkan 1.1. Exclude physical storage buffer which doesn't support
                                 // the legacy decorations.
                                 if (c.core11 &&
-                                    (c.visScope != SCOPE_DEVICE || c.payloadType == DATA_TYPE_UINT64 ||
+                                    (c.visScope || c.payloadType == DATA_TYPE_UINT64 ||
                                      c.payloadType == DATA_TYPE_FLOAT64 || c.syncScope == SCOPE_QUEUEFAMILY ||
                                      c.payloadSC == SC_PHYSBUFFER))
                                 {
