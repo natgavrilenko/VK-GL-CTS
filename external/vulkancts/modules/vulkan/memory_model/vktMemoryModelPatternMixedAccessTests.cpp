@@ -155,7 +155,7 @@ void MemoryModelPatternMixedAccessTestCase::initPrograms(SourceCollections &prog
            "#extension GL_ARB_gpu_shader_int64 : enable\n"
            "#extension GL_EXT_buffer_reference : enable\n";
 
-    if (m_data.payloadSC == SC_WORKGROUP)
+    if (!m_data.core11 && m_data.payloadSC == SC_WORKGROUP)
     {
         const bool hasVisibility = m_data.visScope != SCOPE_INVOCATION;
         const bool hasDeviceVisibility = m_data.visScope == SCOPE_DEVICE;
@@ -206,7 +206,7 @@ void MemoryModelPatternMixedAccessTestCase::initPrograms(SourceCollections &prog
         if (m_data.visScope != SCOPE_INVOCATION)
             loadOperands = std::string("0x30, ") + gl_scope(m_data.visScope);
 
-        if (m_data.payloadSC == SC_WORKGROUP)
+        if (!m_data.core11 && m_data.payloadSC == SC_WORKGROUP)
             css << "   init = loadPayload(payload.x[payloadPartnerCoord], " << loadOperands << ");\n";
         else
             css << "   init = " << gl_load("payload", "payloadPartnerCoord") << ";\n";
@@ -215,7 +215,7 @@ void MemoryModelPatternMixedAccessTestCase::initPrograms(SourceCollections &prog
             << "   r0 = " << gl_atomicLoad("payload", "payloadPartnerCoord", syncScope, 0) << ";\n"
             << "   if (r0 == " << typeStr << "(partnerBufferCoord + 1)) {\n";
 
-        if (m_data.payloadSC == SC_WORKGROUP)
+        if (!m_data.core11 && m_data.payloadSC == SC_WORKGROUP)
             css << "      r1 = loadPayload(payload.x[payloadPartnerCoord], " << loadOperands << ");\n";
         else
             css << "      r1 = " << gl_load("payload", "payloadPartnerCoord") << ";\n";
