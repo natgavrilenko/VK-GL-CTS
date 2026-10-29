@@ -300,6 +300,137 @@ StreamOp MemoryModelGlTestCase::gl_layoutCoordinates(const Stage stage, const Sc
     };
 }
 
+StreamOp MemoryModelGlTestCase::gl_layoutCoordinates3(const Stage stage, const Scope mappingScope)
+{
+    return [=](std::ostream &os) {
+
+        os << "   uint gridDim = DIM * NUM_WORKGROUP_EACH_DIM;\n";
+
+        if (mappingScope == SCOPE_SUBGROUP)
+        {
+            os << "   uint stride = gl_SubgroupSize / 3u;\n"
+                  "   uint index = gl_SubgroupInvocationID;\n"
+                  "   uint indexPartner1 = (index + stride) % max(3u * stride, 1u);\n"
+                  "   uint indexPartner2 = (index + 2u * stride) % max(3u * stride, 1u);\n";
+
+            if (stage == STAGE_COMPUTE)
+            {
+                os << "   ivec2 localId = ivec2(gl_LocalInvocationID.xy);\n"
+                      "   ivec2 groupId = ivec2(gl_WorkGroupID.xy);\n"
+                      "   uint sharedCoord = localId.y * DIM + localId.x;\n"
+                      "   uint groupOffset = groupId.y * gridDim * DIM + groupId.x * DIM * DIM;\n"
+                      "   uint bufferCoord = groupOffset + sharedCoord;\n"
+                      "   ivec2 imageCoord = ivec2(gl_GlobalInvocationID.xy);\n"
+                      "   uint sharedCoordPartner1 = subgroupShuffle(sharedCoord, indexPartner1);\n"
+                      "   uint sharedCoordPartner2 = subgroupShuffle(sharedCoord, indexPartner2);\n";
+            }
+            else if (stage == STAGE_VERTEX)
+            {
+                os << "   uint bufferCoord = gl_VertexIndex;\n"
+                      "   ivec2 imageCoord = ivec2(gl_VertexIndex % gridDim, gl_VertexIndex / gridDim);\n";
+            }
+            else if (stage == STAGE_FRAGMENT)
+            {
+                os << "   ivec2 localId = ivec2(gl_FragCoord.xy) % ivec2(DIM);\n"
+                      "   ivec2 groupId = ivec2(gl_FragCoord.xy) / ivec2(DIM);\n"
+                      "   uint sharedCoord = localId.y * DIM + localId.x;\n"
+                      "   uint groupOffset = groupId.y * gridDim * DIM + groupId.x * DIM * DIM;\n"
+                      "   uint bufferCoord = groupOffset + sharedCoord;\n"
+                      "   ivec2 imageCoord = ivec2(gl_FragCoord.xy);\n";
+            }
+
+            os << "   uint bufferCoordPartner1 = subgroupShuffle(bufferCoord, indexPartner1);\n"
+                  "   uint bufferCoordPartner2 = subgroupShuffle(bufferCoord, indexPartner2);\n"
+                  "   ivec2 imageCoordPartner1 = subgroupShuffle(imageCoord, indexPartner1);\n"
+                  "   ivec2 imageCoordPartner2 = subgroupShuffle(imageCoord, indexPartner2);\n";
+        }
+        else if (mappingScope == SCOPE_WORKGROUP)
+        {
+            DE_ASSERT(stage == STAGE_COMPUTE);
+
+            os << "   ivec2 localId = ivec2(gl_LocalInvocationID.xy);\n"
+                  "   ivec2 globalId = ivec2(gl_GlobalInvocationID.xy);\n"
+                  "   uint stride = DIM * DIM / 3u;\n"
+                  "   uint index = localId.y * DIM + localId.x;\n"
+                  "   uint indexPartner1 = (index + stride) % (3u * stride);\n"
+                  "   uint indexPartner2 = (index + 2u * stride) % (3u * stride);\n"
+                  "   uint groupOffset = gl_WorkGroupID.y * gridDim * DIM + gl_WorkGroupID.x * DIM * DIM;\n"
+                  "   ivec2 localIdPartner1 = ivec2(indexPartner1 % DIM, indexPartner1 / DIM);\n"
+                  "   ivec2 localIdPartner2 = ivec2(indexPartner2 % DIM, indexPartner2 / DIM);\n"
+                  "   ivec2 globalIdPartner1 = ivec2(gl_WorkGroupID.xy * gl_WorkGroupSize.xy) + localIdPartner1;\n"
+                  "   ivec2 globalIdPartner2 = ivec2(gl_WorkGroupID.xy * gl_WorkGroupSize.xy) + localIdPartner2;\n"
+                  "   uint sharedCoord = index;\n"
+                  "   uint sharedCoordPartner1 = indexPartner1;\n"
+                  "   uint sharedCoordPartner2 = indexPartner2;\n"
+                  "   uint bufferCoord = groupOffset + index;\n"
+                  "   uint bufferCoordPartner1 = groupOffset + indexPartner1;\n"
+                  "   uint bufferCoordPartner2 = groupOffset + indexPartner2;\n"
+                  "   ivec2 imageCoord = globalId;\n"
+                  "   ivec2 imageCoordPartner1 = globalIdPartner1;\n"
+                  "   ivec2 imageCoordPartner2 = globalIdPartner2;\n";
+        }
+        else if (mappingScope == SCOPE_QUEUEFAMILY || mappingScope == SCOPE_DEVICE)
+        {
+            if (stage == STAGE_COMPUTE)
+            {
+                os << "   ivec2 globalId = ivec2(gl_GlobalInvocationID.xy);\n"
+                      "   uint stride = gridDim * gridDim / 3u;\n"
+                      "   uint index = globalId.y * gridDim + globalId.x;\n"
+                      "   uint indexPartner1 = (index + stride) % (3u * stride);\n"
+                      "   uint indexPartner2 = (index + 2u * stride) % (3u * stride);\n"
+                      "   ivec2 globalIdPartner1 = ivec2(indexPartner1 % gridDim, indexPartner1 / gridDim);\n"
+                      "   ivec2 globalIdPartner2 = ivec2(indexPartner2 % gridDim, indexPartner2 / gridDim);\n"
+                      "   uint bufferCoord = globalId.y * gridDim + globalId.x;\n"
+                      "   uint bufferCoordPartner1 = globalIdPartner1.y * gridDim + globalIdPartner1.x;\n"
+                      "   uint bufferCoordPartner2 = globalIdPartner2.y * gridDim + globalIdPartner2.x;\n"
+                      "   ivec2 imageCoord = globalId;\n"
+                      "   ivec2 imageCoordPartner1 = globalIdPartner1;\n"
+                      "   ivec2 imageCoordPartner2 = globalIdPartner2;\n";
+            }
+            else if (stage == STAGE_VERTEX)
+            {
+                os << "   uint gridDim = DIM * NUM_WORKGROUP_EACH_DIM;\n"
+                      "   ivec2 globalId = ivec2(gl_VertexIndex % gridDim, gl_VertexIndex / gridDim);\n"
+                      "   uint index = globalId.y * gridDim + globalId.x;\n"
+                      "   uint indexPartner1 = (index + stride) % (3u * stride);\n"
+                      "   uint indexPartner2 = (index + 2u * stride) % (3u * stride);\n"
+                      "   uint bufferCoord = index;\n"
+                      "   uint bufferCoordPartner1 = indexPartner1;\n"
+                      "   uint bufferCoordPartner2 = indexPartner2;\n"
+                      "   ivec2 imageCoord = ivec2(index % gridDim, index / gridDim);\n"
+                      "   ivec2 imageCoordPartner1 = ivec2(indexPartner1 % gridDim, indexPartner1 / gridDim);\n"
+                      "   ivec2 imageCoordPartner2 = ivec2(indexPartner2 % gridDim, indexPartner2 / gridDim);\n";
+            }
+            else if (stage == STAGE_FRAGMENT)
+            {
+                os << "   uint stride = DIM * DIM / 3u;\n"
+                      "   ivec2 localId = ivec2(gl_FragCoord.xy) % ivec2(DIM);\n"
+                      "   ivec2 groupId = ivec2(gl_FragCoord.xy) / ivec2(DIM);\n"
+                      "   uint index = localId.y * DIM + localId.x;\n"
+                      "   uint indexPartner1 = (index + stride) % (3u * stride);\n"
+                      "   uint indexPartner2 = (index + 2u * stride) % (3u * stride);\n"
+                      "   ivec2 localIdPartner1 = ivec2(indexPartner1 % DIM, indexPartner1 / DIM);\n"
+                      "   ivec2 localIdPartner2 = ivec2(indexPartner2 % DIM, indexPartner2 / DIM);\n"
+                      "   uint groupBase = (groupId.y * NUM_WORKGROUP_EACH_DIM + groupId.x) * DIM * DIM;\n"
+                      "   uint bufferCoord = groupBase + index;\n"
+                      "   uint bufferCoordPartner1 = groupBase + indexPartner1;\n"
+                      "   uint bufferCoordPartner2 = groupBase + indexPartner2;\n"
+                      "   ivec2 imageCoord = groupId * DIM + localId;\n"
+                      "   ivec2 imageCoordPartner1 = groupId * DIM + localIdPartner1;\n"
+                      "   ivec2 imageCoordPartner2 = groupId * DIM + localIdPartner2;\n";
+            }
+        }
+
+        if (stage == STAGE_VERTEX)
+        {
+            os << "   gl_PointSize = 1.0f;\n"
+                  "   gl_Position = vec4(0.0f, 0.0f, 0.0f, 1.0f);\n";
+        }
+
+        os << "   bool skipThread = index >= 3u * stride;\n";
+    };
+}
+
 const char *MemoryModelGlTestCase::gl_barrier()
 {
     return "barrier()";

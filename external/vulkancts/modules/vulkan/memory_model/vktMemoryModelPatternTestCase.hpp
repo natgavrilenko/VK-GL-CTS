@@ -150,6 +150,7 @@ public:
 
 protected:
     static StreamOp gl_layoutCoordinates(const Stage stage, Scope mappingScope);
+    static StreamOp gl_layoutCoordinates3(const Stage stage, Scope mappingScope);
     static const char *gl_barrier();
     static StreamOp gl_controlBarrier(Scope scope1, Scope scope2, uint32_t sem);
     static StreamOp gl_controlBarrierArrive(Scope scope1, Scope scope2, uint32_t sem);
