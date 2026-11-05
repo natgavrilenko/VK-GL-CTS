@@ -1,11 +1,10 @@
-#ifndef _VKTMEMORYMODELPADDING_HPP
-#define _VKTMEMORYMODELPADDING_HPP
-/*------------------------------------------------------------------------
+#ifndef _VKTMEMORYMODELAVVISCHAINSTESTS_HPP
+#define _VKTMEMORYMODELAVVISCHAINSTESTS_HPP
+/*-------------------------------------------------------------------------
  * Vulkan Conformance Tests
  * ------------------------
  *
- * Copyright (c) 2019 The Khronos Group Inc.
- * Copyright (c) 2019 Valve Corporation.
+ * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +20,7 @@
  *
  *//*!
  * \file
- * \brief Vulkan Memory Model padding access tests
+ * \brief Memory Model Availability-Visibility Chains Tests
  *//*--------------------------------------------------------------------*/
 
 #include "tcuDefs.hpp"
@@ -31,8 +30,10 @@ namespace vkt
 {
 namespace MemoryModel
 {
-tcu::TestCaseGroup *createPaddingTests(tcu::TestContext &testCtx);
+
+tcu::TestCaseGroup *createAvVisChainsTests(tcu::TestContext &testCtx);
+
 } // namespace MemoryModel
 } // namespace vkt
 
-#endif // _VKTMEMORYMODELPADDING_HPP
+#endif // _VKTMEMORYMODELAVVISCHAINSTESTS_HPP

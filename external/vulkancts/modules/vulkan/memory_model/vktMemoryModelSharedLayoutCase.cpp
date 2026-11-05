@@ -19,7 +19,7 @@
  *
  *//*!
  * \file
- * \brief Shared memory layout test case.
+ * \brief Shared memory layout test case
  *//*--------------------------------------------------------------------*/
 
 #include <vkDefs.hpp>

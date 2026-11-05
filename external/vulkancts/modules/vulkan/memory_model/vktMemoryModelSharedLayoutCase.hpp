@@ -21,7 +21,7 @@
  *
  *//*!
  * \file
- * \brief Shared memory layout tests.
+ * \brief Shared memory layout test case
  *//*--------------------------------------------------------------------*/
 
 #include "vktTestCase.hpp"

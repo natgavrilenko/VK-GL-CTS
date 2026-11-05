@@ -110825,9 +110825,9 @@ dEQP-VK.image.texel_view_compatible.graphic.extended.3d_image.texture_write.etc2
 dEQP-VK.image.texel_view_compatible.graphic.extended.3d_image.texture_write.etc2_r8g8b8a8_unorm_block.r32g32b32a32_uint
 dEQP-VK.imageless_framebuffer.different_attachments
 dEQP-VK.info.instance_extension_device_functions
-dEQP-VK.memory_model.message_passing.permuted_index.barrier
-dEQP-VK.memory_model.message_passing.permuted_index.release_acquire
-dEQP-VK.memory_model.message_passing.permuted_index.release_acquire_atomic_payload
+dEQP-VK.memory_model.amber.permuted_index.barrier
+dEQP-VK.memory_model.amber.permuted_index.release_acquire
+dEQP-VK.memory_model.amber.permuted_index.release_acquire_atomic_payload
 dEQP-VK.memory.address_binding_report.create_and_destroy_object.buffer_storage_large
 dEQP-VK.memory.address_binding_report.create_and_destroy_object.buffer_storage_small
 dEQP-VK.memory.address_binding_report.create_and_destroy_object.buffer_uniform_large
