@@ -1,11 +1,10 @@
-#ifndef _VKTMEMORYMODELSHAREDLAYOUT_HPP
-#define _VKTMEMORYMODELSHAREDLAYOUT_HPP
-/*------------------------------------------------------------------------
+#ifndef _VKTMEMORYMODELTRANSITIVESEMANTICSTESTS_HPP
+#define _VKTMEMORYMODELTRANSITIVESEMANTICSTESTS_HPP
+/*-------------------------------------------------------------------------
  * Vulkan Conformance Tests
  * ------------------------
  *
- * Copyright (c) 2021 The Khronos Group Inc.
- * Copyright (c) 2021 Google LLC.
+ * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +20,10 @@
  *
  *//*!
  * \file
- * \brief Shared memory layout tests.
+ * \brief Memory Model Transitive Semantics Tests
  *//*--------------------------------------------------------------------*/
 
+#include "tcuDefs.hpp"
 #include "tcuTestCase.hpp"
 
 namespace vkt
@@ -31,9 +31,9 @@ namespace vkt
 namespace MemoryModel
 {
 
-tcu::TestCaseGroup *createSharedMemoryLayoutTests(tcu::TestContext &testCtx);
+tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx);
 
 } // namespace MemoryModel
 } // namespace vkt
 
-#endif // _VKTMEMORYMODELSHAREDLAYOUT_HPP
+#endif // _VKTMEMORYMODELTRANSITIVESEMANTICSTESTS_HPP
