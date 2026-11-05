@@ -22,13 +22,14 @@
  *//*--------------------------------------------------------------------*/
 
 #include "vktMemoryModelTests.hpp"
+
 #include "vktMemoryModelAmberTests.hpp"
-#include "vktMemoryModelPaddingTests.hpp"
+#include "vktMemoryModelAvVisChainsTests.hpp"
 #include "vktMemoryModelMessagePassingTests.hpp"
 #include "vktMemoryModelMixedAccessTests.hpp"
-#include "vktMemoryModelTransitiveSemanticsTests.hpp"
-#include "vktMemoryModelAvVisChainsTests.hpp"
+#include "vktMemoryModelPaddingTests.hpp"
 #include "vktMemoryModelSharedLayoutTests.hpp"
+#include "vktMemoryModelTransitiveSemanticsTests.hpp"
 
 #include "deUniquePtr.hpp"
 #include "tcuTestCase.hpp"
@@ -42,7 +43,9 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const std::string &na
 {
     de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, name.c_str()));
 
+#ifndef CTS_USES_VULKANSC
     group->addChild(createAmberTests(testCtx));
+#endif // CTS_USES_VULKANSC
     group->addChild(createAvVisChainsTests(testCtx));
     group->addChild(createMessagePassingTests(testCtx));
     group->addChild(createMixedAccessTests(testCtx));
