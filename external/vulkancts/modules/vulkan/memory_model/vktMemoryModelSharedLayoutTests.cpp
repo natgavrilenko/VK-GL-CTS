@@ -19,10 +19,10 @@
  *
  *//*!
  * \file
- * \brief Shared memory model layout tests.
+ * \brief Shared memory model layout tests
  *//*--------------------------------------------------------------------*/
 
-#include "vktMemoryModelSharedLayout.hpp"
+#include "vktMemoryModelSharedLayoutTests.hpp"
 #include "vktMemoryModelSharedLayoutCase.hpp"
 
 #include "tcuCommandLine.hpp"
