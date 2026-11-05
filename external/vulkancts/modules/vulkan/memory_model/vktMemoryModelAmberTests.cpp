@@ -28,6 +28,11 @@
 #include "vktAmberTestCase.hpp"
 #include "vktTestCase.hpp"
 
+#include "deUniquePtr.hpp"
+#include "tcuTestCase.hpp"
+
+#include <string>
+
 namespace vkt
 {
 namespace MemoryModel
@@ -35,6 +40,7 @@ namespace MemoryModel
 
 namespace
 {
+
 #ifndef CTS_USES_VULKANSC
 void checkPermutedIndexSupport(Context &context, std::string testName)
 {
@@ -56,8 +62,6 @@ void checkPermutedIndexSupport(Context &context, std::string testName)
 }
 #endif // CTS_USES_VULKANSC
 
-} // namespace
-
 tcu::TestCaseGroup *createPermutedIndexTests(tcu::TestContext &testCtx)
 {
     de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "permuted_index"));
@@ -74,10 +78,12 @@ tcu::TestCaseGroup *createPermutedIndexTests(tcu::TestContext &testCtx)
         testCase->setCheckSupportCallback(checkPermutedIndexSupport);
         group->addChild(testCase);
     }
-#endif
+#endif // CTS_USES_VULKANSC
 
     return group.release();
 }
+
+} // namespace
 
 tcu::TestCaseGroup *createAmberTests(tcu::TestContext &testCtx)
 {
