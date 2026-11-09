@@ -25,6 +25,7 @@
 
 #include "vktMemoryModelMixedAccessTests.hpp"
 #include "vktMemoryModelTestCase.hpp"
+#include "vktMemoryModelUtil.hpp"
 
 #include "deUniquePtr.hpp"
 #include "tcuTestCase.hpp"
@@ -225,83 +226,52 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
 
     de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, "mixed_access"));
 
-    for (const auto &core11 : core11Cases)
+    for (const auto &[core11, type, local, sc, syncScope, visScope, stage] :
+         Combinations(core11Cases, typeCases, localCases, scCases, syncScopeCases, visScopeCases, stageCases))
     {
-        de::MovePtr<tcu::TestCaseGroup> core11Group(new tcu::TestCaseGroup(testCtx, core11.name));
-        for (const auto &type : typeCases)
+        CaseDef c = {
+            core11.value,    // bool core11;
+            local.value,     // bool payloadMemLocal;
+            sc.value,        // StorageClass payloadSC;
+            type.value,      // DataType payloadType;
+            syncScope.value, // Scope syncScope;
+            visScope.value,  // std::optional<Scope> visScope;
+            stage.value,     // Stage stage;
+        };
+
+        // Mustpass11 tests should only exercise things we expect to work on existing implementations. Exclude
+        // noncoherent tests which require new extensions. Exclude queuefamily scope which doesn't exist in Vulkan 1.1.
+        // Exclude physical storage buffer which doesn't support coherent decoration.
+        if (c.core11 && (c.visScope || c.payloadType == DATA_TYPE_UINT64 || c.payloadType == DATA_TYPE_FLOAT64 ||
+                         c.syncScope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER))
         {
-            de::MovePtr<tcu::TestCaseGroup> typeGroup(new tcu::TestCaseGroup(testCtx, type.name));
-            for (const auto &local : localCases)
-            {
-                de::MovePtr<tcu::TestCaseGroup> localGroup(new tcu::TestCaseGroup(testCtx, local.name));
-                for (const auto &sc : scCases)
-                {
-                    de::MovePtr<tcu::TestCaseGroup> scGroup(new tcu::TestCaseGroup(testCtx, sc.name));
-                    for (const auto &syncScope : syncScopeCases)
-                    {
-                        de::MovePtr<tcu::TestCaseGroup> syncScopeGroup(new tcu::TestCaseGroup(testCtx, syncScope.name));
-                        for (const auto &visScope : visScopeCases)
-                        {
-                            const bool coherent = core11.value && !visScope.value.has_value();
-                            de::MovePtr<tcu::TestCaseGroup> visScopeGroup(
-                                new tcu::TestCaseGroup(testCtx, coherent ? "coherent" : visScope.name));
-                            for (const auto &stage : stageCases)
-                            {
-                                CaseDef c = {
-                                    core11.value,    // bool core11;
-                                    local.value,     // bool payloadMemLocal;
-                                    sc.value,        // StorageClass payloadSC;
-                                    type.value,      // DataType payloadType;
-                                    syncScope.value, // Scope syncScope;
-                                    visScope.value,  // std::optional<Scope> visScope;
-                                    stage.value,     // Stage stage;
-                                };
-
-                                // Mustpass11 tests should only exercise things we expect to work on
-                                // existing implementations. Exclude noncoherent tests which require
-                                // new extensions. Exclude queuefamily scope which doesn't exist in
-                                // Vulkan 1.1. Exclude physical storage buffer which doesn't support
-                                // the legacy decorations.
-                                if (c.core11 && (c.visScope || c.payloadType == DATA_TYPE_UINT64 ||
-                                                 c.payloadType == DATA_TYPE_FLOAT64 ||
-                                                 c.syncScope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER))
-                                {
-                                    continue;
-                                }
-
-                                // Don't exercise workgroup memory for non-compute stages
-                                if (c.stage != STAGE_COMPUTE &&
-                                    (c.syncScope == SCOPE_WORKGROUP || c.payloadSC == SC_WORKGROUP ||
-                                     c.visScope == SCOPE_WORKGROUP))
-                                {
-                                    continue;
-                                }
-
-                                // Don't exercise local and non-local for workgroup memory
-                                if (c.payloadSC == SC_WORKGROUP && c.payloadMemLocal != 0)
-                                {
-                                    continue;
-                                }
-
-                                // No 64-bit image types, so skip tests for 64-bit types
-                                if (c.payloadSC == SC_IMAGE &&
-                                    (c.payloadType == DATA_TYPE_UINT64 || c.payloadType == DATA_TYPE_FLOAT64))
-                                {
-                                    continue;
-                                }
-                                visScopeGroup->addChild(new MixedAccessTestCase(testCtx, stage.name, c));
-                            }
-                            syncScopeGroup->addChild(visScopeGroup.release());
-                        }
-                        scGroup->addChild(syncScopeGroup.release());
-                    }
-                    localGroup->addChild(scGroup.release());
-                }
-                typeGroup->addChild(localGroup.release());
-            }
-            core11Group->addChild(typeGroup.release());
+            continue;
         }
-        ttGroup->addChild(core11Group.release());
+
+        // Don't exercise workgroup memory for non-compute stages
+        if (c.stage != STAGE_COMPUTE &&
+            (c.syncScope == SCOPE_WORKGROUP || c.payloadSC == SC_WORKGROUP || c.visScope == SCOPE_WORKGROUP))
+        {
+            continue;
+        }
+
+        // Don't exercise local and non-local for workgroup memory
+        if (c.payloadSC == SC_WORKGROUP && c.payloadMemLocal != 0)
+        {
+            continue;
+        }
+
+        // No 64-bit image types, so skip tests for 64-bit types
+        if (c.payloadSC == SC_IMAGE && (c.payloadType == DATA_TYPE_UINT64 || c.payloadType == DATA_TYPE_FLOAT64))
+        {
+            continue;
+        }
+
+        const bool coherent = core11.value && !visScope.value.has_value();
+        addTestCase(
+            *ttGroup,
+            {core11.name, type.name, local.name, sc.name, syncScope.name, coherent ? "coherent" : visScope.name},
+            new MixedAccessTestCase(testCtx, stage.name, c));
     }
 
     return ttGroup.release();

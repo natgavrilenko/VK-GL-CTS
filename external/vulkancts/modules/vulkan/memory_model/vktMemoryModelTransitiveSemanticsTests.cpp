@@ -25,6 +25,7 @@
 
 #include "vktMemoryModelTransitiveSemanticsTests.hpp"
 #include "vktMemoryModelTestCase.hpp"
+#include "vktMemoryModelUtil.hpp"
 
 #include "deUniquePtr.hpp"
 #include "tcuTestCase.hpp"
@@ -176,121 +177,55 @@ tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx)
     };
 
     // Group names say which buffer a parameter belongs to, e.g. "payload_buffer", "guard1_local" or "guard2_u32"
-    const auto createGroup = [&testCtx](const char *bufferName, const char *caseName)
-    {
-        return de::MovePtr<tcu::TestCaseGroup>(
-            new tcu::TestCaseGroup(testCtx, (std::string(bufferName) + "_" + caseName).c_str()));
-    };
+    const auto groupName = [](const char *bufferName, const char *caseName)
+    { return std::string(bufferName) + "_" + caseName; };
 
-    // Each variant is discarded at the level where its last parameter is chosen, so no group is left empty:
-    // - payload, guard1 and guard2 use storage classes with different storage class semantics
-    // - workgroup memory is only tested as non-local
-    // - image memory has no 64-bit types
     de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, "transitive_semantics"));
-    for (const auto &sc0 : scCases)
+    for (const auto &[sc0, sc1, sc2, local0, local1, local2, type0, type1, type2, scope] :
+         Combinations(scCases, scCases, scCases, localCases, localCases, localCases, typeCases, typeCases, typeCases,
+                      scopeCases))
     {
-        const StorageClass payloadSC = sc0.value;
+        const CaseDef c = {
+            local0.value, // bool payloadMemLocal;
+            local1.value, // bool guard1MemLocal;
+            local2.value, // bool guard2MemLocal;
+            sc0.value,    // StorageClass payloadSC;
+            sc1.value,    // StorageClass guard1SC;
+            sc2.value,    // StorageClass guard2SC;
+            type0.value,  // DataType payloadType;
+            type1.value,  // DataType guard1Type;
+            type2.value,  // DataType guard2Type;
+            scope.value,  // Scope scope;
+        };
 
-        de::MovePtr<tcu::TestCaseGroup> sc0Group = createGroup("payload", sc0.name);
-        for (const auto &sc1 : scCases)
+        // Payload, guard1 and guard2 use storage classes with different storage class semantics
+        if (scToSem(c.guard1SC) == scToSem(c.payloadSC) || scToSem(c.guard2SC) == scToSem(c.payloadSC) ||
+            scToSem(c.guard2SC) == scToSem(c.guard1SC))
         {
-            const StorageClass guard1SC = sc1.value;
-
-            if (scToSem(guard1SC) == scToSem(payloadSC))
-                continue;
-
-            de::MovePtr<tcu::TestCaseGroup> sc1Group = createGroup("guard1", sc1.name);
-            for (const auto &sc2 : scCases)
-            {
-                const StorageClass guard2SC = sc2.value;
-
-                if (scToSem(guard2SC) == scToSem(payloadSC) || scToSem(guard2SC) == scToSem(guard1SC))
-                    continue;
-
-                de::MovePtr<tcu::TestCaseGroup> sc2Group = createGroup("guard2", sc2.name);
-                for (const auto &local0 : localCases)
-                {
-                    const bool payloadMemLocal = local0.value;
-
-                    if (payloadMemLocal && payloadSC == SC_WORKGROUP)
-                        continue;
-
-                    de::MovePtr<tcu::TestCaseGroup> local0Group = createGroup("payload", local0.name);
-                    for (const auto &local1 : localCases)
-                    {
-                        const bool guard1MemLocal = local1.value;
-
-                        if (guard1MemLocal && guard1SC == SC_WORKGROUP)
-                            continue;
-
-                        de::MovePtr<tcu::TestCaseGroup> local1Group = createGroup("guard1", local1.name);
-                        for (const auto &local2 : localCases)
-                        {
-                            const bool guard2MemLocal = local2.value;
-
-                            if (guard2MemLocal && guard2SC == SC_WORKGROUP)
-                                continue;
-
-                            de::MovePtr<tcu::TestCaseGroup> local2Group = createGroup("guard2", local2.name);
-                            for (const auto &type0 : typeCases)
-                            {
-                                const DataType payloadType = type0.value;
-
-                                if (payloadType == DATA_TYPE_UINT64 && payloadSC == SC_IMAGE)
-                                    continue;
-
-                                de::MovePtr<tcu::TestCaseGroup> type0Group = createGroup("payload", type0.name);
-                                for (const auto &type1 : typeCases)
-                                {
-                                    const DataType guard1Type = type1.value;
-
-                                    if (guard1Type == DATA_TYPE_UINT64 && guard1SC == SC_IMAGE)
-                                        continue;
-
-                                    de::MovePtr<tcu::TestCaseGroup> type1Group = createGroup("guard1", type1.name);
-                                    for (const auto &type2 : typeCases)
-                                    {
-                                        const DataType guard2Type = type2.value;
-
-                                        if (guard2Type == DATA_TYPE_UINT64 && guard2SC == SC_IMAGE)
-                                            continue;
-
-                                        de::MovePtr<tcu::TestCaseGroup> type2Group = createGroup("guard2", type2.name);
-                                        for (const auto &scope : scopeCases)
-                                        {
-                                            const CaseDef c = {
-                                                payloadMemLocal, // bool payloadMemLocal;
-                                                guard1MemLocal,  // bool guard1MemLocal;
-                                                guard2MemLocal,  // bool guard2MemLocal;
-                                                payloadSC,       // StorageClass payloadSC;
-                                                guard1SC,        // StorageClass guard1SC;
-                                                guard2SC,        // StorageClass guard2SC;
-                                                payloadType,     // DataType payloadType;
-                                                guard1Type,      // DataType guard1Type;
-                                                guard2Type,      // DataType guard2Type;
-                                                scope.value,     // Scope scope;
-                                            };
-
-                                            type2Group->addChild(
-                                                new TransitiveSemanticsTestCase(testCtx, scope.name, c));
-                                        }
-                                        type1Group->addChild(type2Group.release());
-                                    }
-                                    type0Group->addChild(type1Group.release());
-                                }
-                                local2Group->addChild(type0Group.release());
-                            }
-                            local1Group->addChild(local2Group.release());
-                        }
-                        local0Group->addChild(local1Group.release());
-                    }
-                    sc2Group->addChild(local0Group.release());
-                }
-                sc1Group->addChild(sc2Group.release());
-            }
-            sc0Group->addChild(sc1Group.release());
+            continue;
         }
-        ttGroup->addChild(sc0Group.release());
+
+        // Workgroup memory is only tested as non-local
+        if ((c.payloadMemLocal && c.payloadSC == SC_WORKGROUP) || (c.guard1MemLocal && c.guard1SC == SC_WORKGROUP) ||
+            (c.guard2MemLocal && c.guard2SC == SC_WORKGROUP))
+        {
+            continue;
+        }
+
+        // Image memory has no 64-bit types
+        if ((c.payloadType == DATA_TYPE_UINT64 && c.payloadSC == SC_IMAGE) ||
+            (c.guard1Type == DATA_TYPE_UINT64 && c.guard1SC == SC_IMAGE) ||
+            (c.guard2Type == DATA_TYPE_UINT64 && c.guard2SC == SC_IMAGE))
+        {
+            continue;
+        }
+
+        addTestCase(*ttGroup,
+                    {groupName("payload", sc0.name), groupName("guard1", sc1.name), groupName("guard2", sc2.name),
+                     groupName("payload", local0.name), groupName("guard1", local1.name),
+                     groupName("guard2", local2.name), groupName("payload", type0.name),
+                     groupName("guard1", type1.name), groupName("guard2", type2.name)},
+                    new TransitiveSemanticsTestCase(testCtx, scope.name, c));
     }
 
     return ttGroup.release();

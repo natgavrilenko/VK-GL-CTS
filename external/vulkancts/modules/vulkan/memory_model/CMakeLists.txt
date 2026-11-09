@@ -24,6 +24,8 @@ set(DEQP_VK_MEMORY_MODEL_SRCS
 	vktMemoryModelTransitiveSemanticsTests.hpp
 	vktMemoryModelTests.cpp
 	vktMemoryModelTests.hpp
+	vktMemoryModelUtil.cpp
+	vktMemoryModelUtil.hpp
 	../util/vktTypeComparisonUtil.hpp
 	../util/vktTypeComparisonUtil.cpp
 )
