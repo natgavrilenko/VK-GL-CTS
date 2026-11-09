@@ -26,6 +26,7 @@
  *//*--------------------------------------------------------------------*/
 
 #include "tcuDefs.hpp"
+#include "tcuTestCase.hpp"
 #include "vktTestCase.hpp"
 
 #include <cstdint>
@@ -37,13 +38,6 @@ namespace vkt
 {
 namespace MemoryModel
 {
-
-template <typename T>
-struct NamedValue
-{
-    T value;
-    const char *name;
-};
 
 enum DataType
 {

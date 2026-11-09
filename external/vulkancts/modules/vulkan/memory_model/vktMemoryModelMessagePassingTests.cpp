@@ -25,6 +25,7 @@
 
 #include "vktMemoryModelMessagePassingTests.hpp"
 #include "vktMemoryModelTestCase.hpp"
+#include "vktMemoryModelUtil.hpp"
 
 #include "deDefs.h"
 #include "deUniquePtr.hpp"
@@ -366,162 +367,104 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const char *groupName
 
     de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, groupName));
 
-    for (const auto &core11 : core11Cases)
+    for (const auto &[core11, dt, coh, st, rmw, scope, pl, psc, gl, gsc, stage] :
+         Combinations(core11Cases, dtCases, cohCases, stCases, rmwCases, scopeCases, plCases, pscCases, glCases,
+                      gscCases, stageCases))
     {
-        de::MovePtr<tcu::TestCaseGroup> core11Group(new tcu::TestCaseGroup(testCtx, core11.name));
-        for (const auto &dt : dtCases)
+        const SyncType syncType = rmw.value ? ST_ATOMIC_RMW : st.value;
+
+        CaseDef c = {
+            pl.value,     // bool payloadMemLocal;
+            gl.value,     // bool guardMemLocal;
+            coh.value,    // bool coherent;
+            core11.value, // bool core11;
+            testType,     // TestType testType;
+            psc.value,    // StorageClass payloadSC;
+            gsc.value,    // StorageClass guardSC;
+            scope.value,  // Scope scope;
+            syncType,     // SyncType syncType;
+            stage.value,  // Stage stage;
+            dt.value,     // DataType dataType;
+        };
+
+        // Mustpass11 tests should only exercise things we expect to work on existing implementations. Exclude
+        // noncoherent tests which require new extensions, and assume atomic synchronization wouldn't work (i.e. atomics
+        // may be implemented as relaxed atomics). Exclude queuefamily scope which doesn't exist in Vulkan 1.1. Exclude
+        // physical storage buffer which doesn't support the legacy decorations.
+        if (c.core11 && (c.coherent == 0 || c.syncType == ST_FENCE_ATOMIC || c.syncType == ST_ATOMIC_FENCE ||
+                         c.syncType == ST_ATOMIC_ATOMIC || c.syncType == ST_ATOMIC_RMW ||
+                         c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64 ||
+                         c.scope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER || c.guardSC == SC_PHYSBUFFER))
         {
-            de::MovePtr<tcu::TestCaseGroup> dtGroup(new tcu::TestCaseGroup(testCtx, dt.name));
-            for (const auto &coh : cohCases)
-            {
-                de::MovePtr<tcu::TestCaseGroup> cohGroup(new tcu::TestCaseGroup(testCtx, coh.name));
-                for (const auto &st : stCases)
-                {
-                    de::MovePtr<tcu::TestCaseGroup> stGroup(new tcu::TestCaseGroup(testCtx, st.name));
-                    for (const auto &rmw : rmwCases)
-                    {
-                        de::MovePtr<tcu::TestCaseGroup> rmwGroup(new tcu::TestCaseGroup(testCtx, rmw.name));
-                        for (const auto &scope : scopeCases)
-                        {
-                            de::MovePtr<tcu::TestCaseGroup> scopeGroup(new tcu::TestCaseGroup(testCtx, scope.name));
-                            for (const auto &pl : plCases)
-                            {
-                                de::MovePtr<tcu::TestCaseGroup> plGroup(new tcu::TestCaseGroup(testCtx, pl.name));
-                                for (const auto &psc : pscCases)
-                                {
-                                    de::MovePtr<tcu::TestCaseGroup> pscGroup(new tcu::TestCaseGroup(testCtx, psc.name));
-                                    for (const auto &gl : glCases)
-                                    {
-                                        de::MovePtr<tcu::TestCaseGroup> glGroup(
-                                            new tcu::TestCaseGroup(testCtx, gl.name));
-                                        for (const auto &gsc : gscCases)
-                                        {
-                                            de::MovePtr<tcu::TestCaseGroup> gscGroup(
-                                                new tcu::TestCaseGroup(testCtx, gsc.name));
-                                            for (const auto &stage : stageCases)
-                                            {
-                                                const SyncType syncType = rmw.value ? ST_ATOMIC_RMW : st.value;
-
-                                                CaseDef c = {
-                                                    pl.value,     // bool payloadMemLocal;
-                                                    gl.value,     // bool guardMemLocal;
-                                                    coh.value,    // bool coherent;
-                                                    core11.value, // bool core11;
-                                                    testType,     // TestType testType;
-                                                    psc.value,    // StorageClass payloadSC;
-                                                    gsc.value,    // StorageClass guardSC;
-                                                    scope.value,  // Scope scope;
-                                                    syncType,     // SyncType syncType;
-                                                    stage.value,  // Stage stage;
-                                                    dt.value,     // DataType dataType;
-                                                };
-
-                                                // Mustpass11 tests should only exercise things we expect to work on
-                                                // existing implementations. Exclude noncoherent tests which require
-                                                // new extensions, and assume atomic synchronization wouldn't work
-                                                // (i.e. atomics may be implemented as relaxed atomics). Exclude
-                                                // queuefamily scope which doesn't exist in Vulkan 1.1. Exclude
-                                                // physical storage buffer which doesn't support the legacy decorations.
-                                                if (c.core11 &&
-                                                    (c.coherent == 0 || c.syncType == ST_FENCE_ATOMIC ||
-                                                     c.syncType == ST_ATOMIC_FENCE || c.syncType == ST_ATOMIC_ATOMIC ||
-                                                     c.syncType == ST_ATOMIC_RMW || c.dataType == DATA_TYPE_UINT64 ||
-                                                     c.dataType == DATA_TYPE_FLOAT64 || c.scope == SCOPE_QUEUEFAMILY ||
-                                                     c.payloadSC == SC_PHYSBUFFER || c.guardSC == SC_PHYSBUFFER))
-                                                {
-                                                    continue;
-                                                }
-
-                                                if (c.stage != STAGE_COMPUTE && c.scope == SCOPE_WORKGROUP)
-                                                {
-                                                    continue;
-                                                }
-
-                                                // Don't exercise local and non-local for workgroup memory
-                                                // Also don't exercise workgroup memory for non-compute stages
-                                                if (c.payloadSC == SC_WORKGROUP &&
-                                                    (c.payloadMemLocal != 0 || c.stage != STAGE_COMPUTE))
-                                                {
-                                                    continue;
-                                                }
-
-                                                if (c.guardSC == SC_WORKGROUP &&
-                                                    (c.guardMemLocal != 0 || c.stage != STAGE_COMPUTE))
-                                                {
-                                                    continue;
-                                                }
-
-                                                // No support for control/split barrier with larger than workgroup scope, or non-compute stages
-                                                if (!hasGuard(c) &&
-                                                    (c.scope == SCOPE_DEVICE || c.scope == SCOPE_QUEUEFAMILY ||
-                                                     c.stage != STAGE_COMPUTE))
-                                                {
-                                                    continue;
-                                                }
-
-                                                if (c.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER &&
-                                                    c.scope != SCOPE_WORKGROUP)
-                                                {
-                                                    continue;
-                                                }
-
-                                                // uint64/float32/float64 testing is primarily for atomics
-                                                // so only test it for ST_ATOMIC_ATOMIC and ST_ATOMIC_RMW
-                                                const bool atomicTesting = (c.dataType == DATA_TYPE_UINT64 ||
-                                                                            c.dataType == DATA_TYPE_FLOAT32 ||
-                                                                            c.dataType == DATA_TYPE_FLOAT64);
-                                                if (atomicTesting && c.syncType != ST_ATOMIC_ATOMIC &&
-                                                    c.syncType != ST_ATOMIC_RMW)
-                                                {
-                                                    continue;
-                                                }
-
-                                                // No 64-bit image types, so skip tests with both payload and guard in image memory
-                                                if (c.dataType == DATA_TYPE_UINT64 && c.payloadSC == SC_IMAGE &&
-                                                    c.guardSC == SC_IMAGE)
-                                                {
-                                                    continue;
-                                                }
-
-                                                // No support for atomic operations on 64-bit floating point images
-                                                if (c.dataType == DATA_TYPE_FLOAT64 &&
-                                                    (c.payloadSC == SC_IMAGE || c.guardSC == SC_IMAGE))
-                                                {
-                                                    continue;
-                                                }
-                                                // Barrier tests have no guard, so only run them with gsc,gl==0
-                                                if (!hasGuard(c) && (c.guardSC != 0 || c.guardMemLocal != 0))
-                                                {
-                                                    continue;
-                                                }
-
-                                                // Atomic RMW is only tested with atomic release and acquire
-                                                if (rmw.value && st.value != ST_ATOMIC_ATOMIC)
-                                                {
-                                                    continue;
-                                                }
-                                                gscGroup->addChild(new MessagePassingTestCase(testCtx, stage.name, c));
-                                            }
-                                            glGroup->addChild(gscGroup.release());
-                                        }
-                                        pscGroup->addChild(glGroup.release());
-                                    }
-                                    plGroup->addChild(pscGroup.release());
-                                }
-                                scopeGroup->addChild(plGroup.release());
-                            }
-                            rmwGroup->addChild(scopeGroup.release());
-                        }
-                        stGroup->addChild(rmwGroup.release());
-                    }
-                    cohGroup->addChild(stGroup.release());
-                }
-                dtGroup->addChild(cohGroup.release());
-            }
-            core11Group->addChild(dtGroup.release());
+            continue;
         }
-        ttGroup->addChild(core11Group.release());
+
+        if (c.stage != STAGE_COMPUTE && c.scope == SCOPE_WORKGROUP)
+        {
+            continue;
+        }
+
+        // Don't exercise local and non-local for workgroup memory
+        // Also don't exercise workgroup memory for non-compute stages
+        if (c.payloadSC == SC_WORKGROUP && (c.payloadMemLocal != 0 || c.stage != STAGE_COMPUTE))
+        {
+            continue;
+        }
+
+        if (c.guardSC == SC_WORKGROUP && (c.guardMemLocal != 0 || c.stage != STAGE_COMPUTE))
+        {
+            continue;
+        }
+
+        // No support for control/split barrier with larger than workgroup scope, or non-compute stages
+        if (!hasGuard(c) && (c.scope == SCOPE_DEVICE || c.scope == SCOPE_QUEUEFAMILY || c.stage != STAGE_COMPUTE))
+        {
+            continue;
+        }
+
+        if (c.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER && c.scope != SCOPE_WORKGROUP)
+        {
+            continue;
+        }
+
+        // uint64/float32/float64 testing is primarily for atomics
+        // so only test it for ST_ATOMIC_ATOMIC and ST_ATOMIC_RMW
+        const bool atomicTesting =
+            (c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT32 || c.dataType == DATA_TYPE_FLOAT64);
+        if (atomicTesting && c.syncType != ST_ATOMIC_ATOMIC && c.syncType != ST_ATOMIC_RMW)
+        {
+            continue;
+        }
+
+        // No 64-bit image types, so skip tests with both payload and guard in image memory
+        if (c.dataType == DATA_TYPE_UINT64 && c.payloadSC == SC_IMAGE && c.guardSC == SC_IMAGE)
+        {
+            continue;
+        }
+
+        // No support for atomic operations on 64-bit floating point images
+        if (c.dataType == DATA_TYPE_FLOAT64 && (c.payloadSC == SC_IMAGE || c.guardSC == SC_IMAGE))
+        {
+            continue;
+        }
+        // Barrier tests have no guard, so only run them with gsc,gl==0
+        if (!hasGuard(c) && (c.guardSC != 0 || c.guardMemLocal != 0))
+        {
+            continue;
+        }
+
+        // Atomic RMW is only tested with atomic release and acquire
+        if (rmw.value && st.value != ST_ATOMIC_ATOMIC)
+        {
+            continue;
+        }
+
+        addTestCase(
+            *ttGroup,
+            {core11.name, dt.name, coh.name, st.name, rmw.name, scope.name, pl.name, psc.name, gl.name, gsc.name},
+            new MessagePassingTestCase(testCtx, stage.name, c));
     }
+
     return ttGroup.release();
 }
 

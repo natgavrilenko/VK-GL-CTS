@@ -25,6 +25,7 @@
 
 #include "vktMemoryModelAvVisChainsTests.hpp"
 #include "vktMemoryModelTestCase.hpp"
+#include "vktMemoryModelUtil.hpp"
 
 #include "deUniquePtr.hpp"
 #include "tcuTestCase.hpp"
@@ -242,50 +243,21 @@ tcu::TestCaseGroup *createAvVisChainsTests(tcu::TestContext &testCtx)
     };
 
     de::MovePtr<tcu::TestCaseGroup> transGroup(new tcu::TestCaseGroup(testCtx, "transitive"));
-    for (const auto &coh : cohCases)
+    for (const auto &[coh, st, pl, psc, gl, gsc, vis] :
+         Combinations(cohCases, stCases, plCases, pscCases, glCases, gscCases, transVisCases))
     {
-        de::MovePtr<tcu::TestCaseGroup> cohGroup(new tcu::TestCaseGroup(testCtx, coh.name));
-        for (const auto &st : stCases)
-        {
-            de::MovePtr<tcu::TestCaseGroup> stGroup(new tcu::TestCaseGroup(testCtx, st.name));
-            for (const auto &pl : plCases)
-            {
-                de::MovePtr<tcu::TestCaseGroup> plGroup(new tcu::TestCaseGroup(testCtx, pl.name));
-                for (const auto &psc : pscCases)
-                {
-                    de::MovePtr<tcu::TestCaseGroup> pscGroup(new tcu::TestCaseGroup(testCtx, psc.name));
-                    for (const auto &gl : glCases)
-                    {
-                        de::MovePtr<tcu::TestCaseGroup> glGroup(new tcu::TestCaseGroup(testCtx, gl.name));
-                        for (const auto &gsc : gscCases)
-                        {
-                            de::MovePtr<tcu::TestCaseGroup> gscGroup(new tcu::TestCaseGroup(testCtx, gsc.name));
-                            for (const auto &vis : transVisCases)
-                            {
-                                CaseDef c = {
-                                    pl.value,       // bool payloadMemLocal;
-                                    gl.value,       // bool guardMemLocal;
-                                    coh.value,      // bool coherent;
-                                    psc.value,      // StorageClass payloadSC;
-                                    gsc.value,      // StorageClass guardSC;
-                                    st.value,       // SyncType syncType;
-                                    DATA_TYPE_UINT, // DataType dataType;
-                                    vis.value,      // bool transitiveVis;
-                                };
-
-                                gscGroup->addChild(new AvVisChainsTestCase(testCtx, vis.name, c));
-                            }
-                            glGroup->addChild(gscGroup.release());
-                        }
-                        pscGroup->addChild(glGroup.release());
-                    }
-                    plGroup->addChild(pscGroup.release());
-                }
-                stGroup->addChild(plGroup.release());
-            }
-            cohGroup->addChild(stGroup.release());
-        }
-        transGroup->addChild(cohGroup.release());
+        CaseDef c = {
+            pl.value,       // bool payloadMemLocal;
+            gl.value,       // bool guardMemLocal;
+            coh.value,      // bool coherent;
+            psc.value,      // StorageClass payloadSC;
+            gsc.value,      // StorageClass guardSC;
+            st.value,       // SyncType syncType;
+            DATA_TYPE_UINT, // DataType dataType;
+            vis.value,      // bool transitiveVis;
+        };
+        addTestCase(*transGroup, {coh.name, st.name, pl.name, psc.name, gl.name, gsc.name},
+                    new AvVisChainsTestCase(testCtx, vis.name, c));
     }
 
     return transGroup.release();
