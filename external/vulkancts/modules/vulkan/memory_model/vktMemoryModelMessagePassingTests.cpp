@@ -132,7 +132,7 @@ private:
 };
 
 MessagePassingTestCase::MessagePassingTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {data.core11, data.stage, getMappingScope(data), 1}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {data.stage, data.core11}, createBuffers(data))
     , m_data(data)
 {
 }
@@ -176,9 +176,11 @@ std::string MessagePassingTestCase::initProgram() const
 
     const DataType type        = getBuffer("payload").type;
     const char *typeStr        = gl_type(type);
-    const std::string expected = (m_data.testType == TT_MP) ? (std::string{typeStr} + "(invocationIdPartner1)") : "0";
+    const std::string expected = (m_data.testType == TT_MP) ? (std::string{typeStr} + "(invocationIdPartner)") : "0";
 
     std::ostringstream css;
+
+    css << initPartnerCoordinates(getMappingScope(m_data));
 
     css << "   bool skip = false;\n"
         << "   uint value = invocationId;\n"
@@ -188,12 +190,12 @@ std::string MessagePassingTestCase::initProgram() const
     if (m_data.testType == TT_MP)
     {
         // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
-        css << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner1")) << " >> 31;\n"
+        css << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner")) << " >> 31;\n"
             << "   " << gl_store("payload", "payloadCoord", "value") << ";\n";
     }
     else
     {
-        css << "   r = " << gl_load("payload", "payloadCoordPartner1") << ";\n";
+        css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n";
     }
 
     switch (m_data.syncType)
@@ -201,26 +203,26 @@ std::string MessagePassingTestCase::initProgram() const
     case ST_FENCE_FENCE:
         css << "   " << gl_memoryBarrier(scope, semRel | semGuard) << ";\n"
             << "   " << gl_atomicStore("guard", "guardCoord", "1u", scope, 0) << ";\n"
-            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner1", scope, 0) << " == 0;\n"
+            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner", scope, 0) << " == 0;\n"
             << "   " << gl_memoryBarrier(scope, semAcq | semGuard) << ";\n";
         break;
     case ST_FENCE_ATOMIC:
         css << "   " << gl_memoryBarrier(scope, semRel | semGuard) << ";\n"
             << "   " << gl_atomicStore("guard", "guardCoord", "1u", scope, 0) << ";\n"
-            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner1", scope, semAcq) << " == 0;\n";
+            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner", scope, semAcq) << " == 0;\n";
         break;
     case ST_ATOMIC_FENCE:
         css << "   " << gl_atomicStore("guard", "guardCoord", "1u", scope, semRel) << ";\n"
-            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner1", scope, 0) << " == 0;\n"
+            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner", scope, 0) << " == 0;\n"
             << "   " << gl_memoryBarrier(scope, semAcq | semGuard) << ";\n";
         break;
     case ST_ATOMIC_ATOMIC:
         css << "   " << gl_atomicStore("guard", "guardCoord", "1u", scope, semRel) << ";\n"
-            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner1", scope, semAcq) << " == 0;\n";
+            << "   skip = " << gl_atomicLoad("guard", "guardCoordPartner", scope, semAcq) << " == 0;\n";
         break;
     case ST_ATOMIC_RMW:
         css << "   " << gl_atomicExchange("guard", "guardCoord", "1u", scope, semRel) << ";\n"
-            << "   skip = " << gl_atomicExchange("guard", "guardCoordPartner1", "2u", scope, semAcq) << " == 0;\n";
+            << "   skip = " << gl_atomicExchange("guard", "guardCoordPartner", "2u", scope, semAcq) << " == 0;\n";
         break;
     case ST_CONTROL_BARRIER:
         css << "   " << gl_controlBarrier(scope, scope, semAcqRel) << ";\n";
@@ -251,7 +253,7 @@ std::string MessagePassingTestCase::initProgram() const
 
     if (m_data.testType == TT_MP)
         css << "   if (!idle && !skip) {\n"
-            << "      r = " << gl_load("payload", "payloadCoordPartner1") << ";\n"
+            << "      r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
             << "      if (r != expected) { " << gl_store("fail", "failCoord", "1") << "; }\n"
             << "   }\n";
     else

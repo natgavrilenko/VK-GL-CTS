@@ -106,10 +106,8 @@ struct BufferDef
 
 struct ParamsDef
 {
-    bool core11;
     Stage stage;
-    Scope mappingScope;
-    uint32_t numPartners;
+    bool core11;
 };
 
 constexpr bool isIntType(const DataType type)
@@ -179,7 +177,7 @@ protected:
     {
         return {};
     }
-    virtual std::string declareSpirvIntrinsics() const
+    virtual std::string declareSpvIntrinsics() const
     {
         return {};
     }
@@ -191,9 +189,10 @@ protected:
     void checkSupportSubgroupFeatures(const Context &context) const;
     void checkSupportSplitBarriers(const Context &context) const;
 
-    // Helper function to initialize coordinates in the given buffer of the first invocation in partner's workgroup
-    // Used by availability-visibility chains tests
-    std::string initLayoutWorkgroupCoordinates(const char *name) const;
+    // Helper function to initialize partner thread coordinates
+    std::string initPartnerCoordinates(Scope scope, const char *suffix="") const;
+    std::string initMultiPartnerCoordinates(Scope scope, uint32_t partners) const;
+    std::string initBufferCoordinates(const char *suffix, const char *pos) const;
 
     // Helper functions to construct glsl instructions with respect to buffer type
     static const char *gl_barrier();
@@ -211,12 +210,18 @@ protected:
     static const char *gl_scope(Scope scope);
     static std::string gl_toUint(DataType type, const std::string &expr);
 
+    // Helper functions for SPIR-V intrinsics
+    std::string declareBufferSpvIntrinsics(const char *name, bool hasDeviceScope) const;
+    std::string spv_load(const char *name, const char *idx) const;
+    std::string spv_load(const char *name, const char *idx, Scope scope) const;
+    std::string spv_store(const char *name, const char *idx, const char *value) const;
+    std::string spv_store(const char *name, const char *idx, const char *value, Scope scope) const;
+
     // Helper functions for buffers
     const BufferDef &getBuffer(const char *name) const;
     uint32_t getBufferSemantics(const char *name) const;
 
 private:
-    std::string initLayoutCoordinates() const;
     bool hasStorageClass(StorageClass sc) const;
     bool hasDataType(DataType type) const;
 
