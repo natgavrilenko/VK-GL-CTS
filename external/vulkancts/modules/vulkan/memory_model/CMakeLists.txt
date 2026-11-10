@@ -12,8 +12,10 @@ set(DEQP_VK_MEMORY_MODEL_SRCS
 	vktMemoryModelMessagePassingTests.hpp
 	vktMemoryModelMixedAccessTests.cpp
 	vktMemoryModelMixedAccessTests.hpp
-	vktMemoryModelPaddingTests.hpp
 	vktMemoryModelPaddingTests.cpp
+	vktMemoryModelPaddingTests.hpp
+	vktMemoryModelRepeatedAccessTests.cpp
+	vktMemoryModelRepeatedAccessTests.hpp
 	vktMemoryModelSharedLayoutCase.cpp
 	vktMemoryModelSharedLayoutCase.hpp
 	vktMemoryModelSharedLayoutTests.cpp

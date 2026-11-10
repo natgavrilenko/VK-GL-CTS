@@ -76,7 +76,7 @@ private:
 
 TransitiveSemanticsTestCase::TransitiveSemanticsTestCase(tcu::TestContext &context, const char *name,
                                                          const CaseDef &data)
-    : MemoryModelTestCase(context, name, {false, STAGE_COMPUTE, data.scope, 2}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createBuffers(data))
     , m_data(data)
 {
 }
@@ -112,6 +112,8 @@ std::string TransitiveSemanticsTestCase::initProgram() const
     const uint32_t semAcq2    = SEM_ACQUIRE | semPayload | semGuard2;
 
     std::ostringstream css;
+
+    css << initMultiPartnerCoordinates(m_data.scope, 2);
 
     css << "   bool skip1 = false;\n"
         << "   bool skip2 = false;\n"
@@ -176,9 +178,7 @@ tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx)
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
-    // Group names say which buffer a parameter belongs to, e.g. "payload_buffer", "guard1_local" or "guard2_u32"
-    const auto groupName = [](const char *bufferName, const char *caseName)
-    { return std::string(bufferName) + "_" + caseName; };
+    const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
 
     de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, "transitive_semantics"));
     for (const auto &[sc0, sc1, sc2, local0, local1, local2, type0, type1, type2, scope] :

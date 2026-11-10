@@ -58,6 +58,14 @@ namespace
 constexpr uint32_t GL_SEM1 = SEM_BUFFER | SEM_IMAGE | SEM_SHARED;
 constexpr uint32_t GL_SEM2 = SEM_ACQUIRE | SEM_RELEASE | SEM_ACQUIRE_RELEASE | SEM_AVAILABLE | SEM_VISIBLE;
 
+constexpr uint32_t SPV_OP_LOAD                 = 61;
+constexpr uint32_t SPV_OP_STORE                = 62;
+constexpr uint32_t SPV_CAPABILITY_DEVICE_SCOPE = 5346;
+constexpr uint32_t SPV_ALIGNED                 = 0x2;
+constexpr uint32_t SPV_MAKE_POINTER_AVAILABLE  = 0x8;
+constexpr uint32_t SPV_MAKE_POINTER_VISIBLE    = 0x10;
+constexpr uint32_t SPV_NON_PRIVATE_POINTER     = 0x20;
+
 constexpr uint32_t DEVICE_ADDRESS_SIZE = static_cast<uint32_t>(sizeof(VkDeviceAddress));
 
 template <std::size_t N>
@@ -122,20 +130,42 @@ const char *gl_qualifier(const MemQualifier qual)
     }
 }
 
-std::string declareCoordinate(const BufferDef &buffer, const std::string &var, const std::string &pos)
+const char *coordBlockSize(const Scope scope)
 {
-    switch (buffer.sc)
+    switch (scope)
     {
-    case SC_BUFFER:
-    case SC_PHYSBUFFER:
-        return "   uint " + var + " = getBufferCoord(" + pos + ");\n";
-    case SC_IMAGE:
-        return "   ivec2 " + var + " = " + pos + ";\n";
-    case SC_WORKGROUP:
-        return "   uint " + var + " = getSharedCoord(" + pos + ");\n";
+    case SCOPE_SUBGROUP:
+        return "gl_SubgroupSize";
+    case SCOPE_WORKGROUP:
+        return "DIM * DIM";
     default:
-        DE_ASSERT(0);
-        return {};
+        return "gridDim * gridDim";
+    }
+}
+
+const char *coordIndex(const Scope scope)
+{
+    switch (scope)
+    {
+    case SCOPE_SUBGROUP:
+        return "gl_SubgroupInvocationID";
+    case SCOPE_WORKGROUP:
+        return "uint((pos.y % DIM) * DIM + pos.x % DIM)";
+    default:
+        return "pos.y * gridDim + pos.x";
+    }
+}
+
+std::string coordPosFromIndex(const Scope scope, const std::string index)
+{
+    switch (scope)
+    {
+    case SCOPE_SUBGROUP:
+        return "subgroupShuffle(pos, " + index + ")";
+    case SCOPE_WORKGROUP:
+        return "pos - pos % DIM + ivec2(" + index + " % DIM, " + index + " / DIM)";
+    default:
+        return "ivec2(" + index + " % gridDim, " + index + " / gridDim)";
     }
 }
 
@@ -297,7 +327,7 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
            "#extension GL_EXT_buffer_reference : enable\n";
 
     // Can be overridden by a child class, empty by default
-    css << declareSpirvIntrinsics();
+    css << declareSpvIntrinsics();
 
     css << "// DIM/NUM_WORKGROUP_EACH_DIM overriden by spec constants\n"
            "layout(constant_id = 0) const int DIM = 1;\n"
@@ -362,8 +392,8 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
         css << "};\n";
     }
 
-    // Declare functions to compute invocation ID and coordinates
-    // Incremented invocationIds by one to avoid collisions with initial zero
+    // Declare functions to compute invocation ID and coordinates.
+    // Incremented invocationIds by one to avoid collisions with initial zero.
     css << "uint getInvocationId(ivec2 pos) { return uint(pos.y * DIM * NUM_WORKGROUP_EACH_DIM + pos.x) + 1u; }\n"
         << "uint getSharedCoord(ivec2 pos) { return uint((pos.y % DIM) * DIM + pos.x % DIM); }\n"
         << "uint getBufferCoord(ivec2 pos) { return uint((pos.y / DIM * NUM_WORKGROUP_EACH_DIM + pos.x / DIM) * "
@@ -380,6 +410,12 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
         css << "   if (gl_HelperInvocation) { return; }\n";
     }
 
+    if (m_params.stage == STAGE_VERTEX)
+    {
+        css << "   gl_PointSize = 1.0f;\n"
+               "   gl_Position = vec4(0.0f, 0.0f, 0.0f, 1.0f);\n";
+    }
+
     for (const auto &buffer : m_buffers)
     {
         if (buffer.sc == SC_PHYSBUFFER && buffer.qual != MEM_NONE)
@@ -389,29 +425,38 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
         }
     }
 
-    css << initLayoutCoordinates();
+    // TODO: Better place for it? Reuse in getInvocationId and getBufferCoord?
+    css << "   uint gridDim = DIM * NUM_WORKGROUP_EACH_DIM;\n";
 
-    for (const auto &buffer : m_buffers)
+    // Compute thread's 2D position (global ID).
+    switch (m_params.stage)
     {
-        if (buffer.sc == SC_WORKGROUP)
-        {
-            css << "   " << buffer.name << ".x[" << buffer.name << "Coord] = 0;\n";
-        }
+    case STAGE_COMPUTE:
+        css << "   ivec2 pos = ivec2(gl_GlobalInvocationID.xy);\n";
+        break;
+    case STAGE_VERTEX:
+        css << "   ivec2 pos = ivec2(gl_VertexIndex % gridDim, gl_VertexIndex / gridDim);\n";
+        break;
+    case STAGE_FRAGMENT:
+        css << "   ivec2 pos = ivec2(gl_FragCoord.xy);\n";
+        break;
+    default:
+        DE_ASSERT(0);
     }
+
+    css << "   uint invocationId = getInvocationId(pos);\n"
+        << initBufferCoordinates("Coord", "pos");
 
     if (hasStorageClass(SC_WORKGROUP))
     {
-        switch (m_params.mappingScope)
+        for (const auto &buffer : m_buffers)
         {
-        case SCOPE_SUBGROUP:
-            css << "   subgroupBarrier();\n";
-            break;
-        case SCOPE_WORKGROUP:
-            css << "   barrier();\n";
-            break;
-        default:
-            DE_ASSERT(0);
+            if (buffer.sc == SC_WORKGROUP)
+            {
+                css << "   " << buffer.name << ".x[" << buffer.name << "Coord] = 0;\n";
+            }
         }
+        css << "   barrier();\n";
     }
 
     // Implemented by a child class
@@ -447,159 +492,164 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
     }
 }
 
-std::string MemoryModelTestCase::initLayoutCoordinates() const
+std::string MemoryModelTestCase::declareBufferSpvIntrinsics(const char *name, const bool hasDeviceScope) const
 {
-    DE_ASSERT(m_params.numPartners >= 1);
+    DE_ASSERT(!m_params.core11);
+
+    const BufferDef &buffer = getBuffer(name);
+    DE_ASSERT(buffer.sc != SC_IMAGE);
+
+    const char *typeStr = gl_type(buffer.type);
+
+    std::string capabilities =
+        hasDeviceScope ? "capabilities = [" + std::to_string(SPV_CAPABILITY_DEVICE_SCOPE) + "], " : "";
 
     std::ostringstream css;
-    css << "   uint gridDim = DIM * NUM_WORKGROUP_EACH_DIM;\n";
 
-    // Compute thread's 2D position (global ID).
-    switch (m_params.stage)
+    css << "spirv_instruction(" << capabilities << "id = " << SPV_OP_LOAD << ")\n"
+        << typeStr << " spv_" << name << "Load(spirv_by_reference " << typeStr << " p, "
+        << "spirv_literal int memoryAccess, spirv_literal int alignment);\n";
+
+    css << "spirv_instruction(" << capabilities << "id = " << SPV_OP_LOAD << ")\n"
+        << typeStr << " spv_" << name << "LoadVis(spirv_by_reference " << typeStr << " p, "
+        << "spirv_literal int memoryAccess, spirv_literal int alignment, int scope);\n";
+
+    css << "spirv_instruction(" << capabilities << "id = " << SPV_OP_STORE << ")\n"
+        << "void spv_" << name << "Store(spirv_by_reference " << typeStr << " p, " << typeStr << " value, "
+        << "spirv_literal int memoryAccess, spirv_literal int alignment);\n";
+
+    css << "spirv_instruction(" << capabilities << "id = " << SPV_OP_STORE << ")\n"
+        << "void spv_" << name << "StoreAv(spirv_by_reference " << typeStr << " p, " << typeStr << " value, "
+        << "spirv_literal int memoryAccess, spirv_literal int alignment, int scope);\n";
+
+    return css.str();
+}
+
+std::string MemoryModelTestCase::initPartnerCoordinates(const Scope scope, const char *suffix) const
+{
+    const std::string size = std::string{"size"} + suffix;
+    const std::string index = std::string{"index"} + suffix;
+    const std::string indexPartner = std::string{"indexPartner"} + suffix;
+    const std::string idle = std::string{"idle"} + suffix;
+    const std::string sgBallot = std::string{"sgBallot"} + suffix;
+    const std::string posPartner = std::string{"posPartner"} + suffix;
+    const std::string invocationIdPartner = std::string{"invocationIdPartner"} + suffix;
+    const std::string suffixCoordPartner = std::string{"CoordPartner"} + suffix;
+
+    std::ostringstream css;
+
+    css << "   uint " << size << " = " << coordBlockSize(scope) << ";\n"
+           "   uint " << index << " = " << coordIndex(scope) << ";\n"
+           "   uint " << indexPartner << " = " << size << " - 1u - " << index << ";\n"
+           "   bool " << idle << " = false;\n";
+
+    // An invocation is idle if its partner is inactive.
+    // Instead of returning from idle invocation, which could cause barrier divergence,
+    // idle invocations are mapped to themselves.
+    if (scope == SCOPE_SUBGROUP)
     {
-    case STAGE_COMPUTE:
-        css << "   ivec2 pos = ivec2(gl_GlobalInvocationID.xy);\n";
-        break;
-    case STAGE_VERTEX:
-        css << "   ivec2 pos = ivec2(gl_VertexIndex % gridDim, gl_VertexIndex / gridDim);\n";
-        break;
-    case STAGE_FRAGMENT:
-        css << "   ivec2 pos = ivec2(gl_FragCoord.xy);\n";
-        break;
-    default:
-        DE_ASSERT(0);
+        css << "   uvec4 " << sgBallot << " = subgroupBallot(true);\n"
+            << "   " << idle << " = " << idle << " || !subgroupBallotBitExtract(" << sgBallot << ", "<< indexPartner << ");\n"
+            << "   if (" << idle << ") {\n"
+            << "      " << indexPartner << " = " << index << ";\n"
+            << "   }\n";
     }
 
-    // Compute mapping block size.
-    // Compute thread's index in the mapping block.
-    switch (m_params.mappingScope)
+    css << "   ivec2 " << posPartner << " = " << coordPosFromIndex(scope, indexPartner) << ";\n";
+
+    // Compute invocationId and coordinates for each partner
+    css << "   uint " << invocationIdPartner << " = getInvocationId(" << posPartner << ");\n";
+    css << initBufferCoordinates(suffixCoordPartner.c_str(), posPartner.c_str());
+
+    return css.str();
+}
+
+std::string MemoryModelTestCase::initMultiPartnerCoordinates(const Scope scope, const uint32_t partners) const
+{
+    DE_ASSERT(partners >= 1);
+
+    std::ostringstream css;
+
+    const uint32_t groupSize = partners + 1;
+    css << "   uint size = " << coordBlockSize(scope) << ";\n"
+        << "   uint index = " << coordIndex(scope) << ";\n"
+        << "   uint stride = size / " << groupSize << "u;\n";
+
+    for (uint32_t i = 1; i <= partners; i++)
     {
-    case SCOPE_SUBGROUP:
-        css << "   uint size = gl_SubgroupSize;\n"
-               "   uint index = gl_SubgroupInvocationID;\n";
-        break;
-    case SCOPE_WORKGROUP:
-        css << "   uint size = DIM * DIM;\n"
-               "   uint index = uint((pos.y % DIM) * DIM + pos.x % DIM);\n";
-        break;
-    default:
-        css << "   uint size = gridDim * gridDim;\n"
-               "   uint index = pos.y * gridDim + pos.x;\n";
+        css << "   uint indexPartner" << i << " = (index + " << i << "u * stride) % (" << groupSize << "u * stride);\n";
     }
 
-    // Compute partner thread indexes.
-    // For a single partner, preserve the original logic.
-    // For multiple partners, increment own index by stride for each partner.
-    if (m_params.numPartners == 1)
-    {
-        css << "   uint indexPartner1 = size - 1u - index;\n"
-               "   bool idle = false;\n";
-    }
-    else
-    {
-        // Assumes subgroupSize >= groupSize
-        const uint32_t groupSize = m_params.numPartners + 1;
-        css << "   uint stride = size / " << groupSize << "u;\n";
-        for (uint32_t i = 1; i <= m_params.numPartners; i++)
-        {
-            css << "   uint indexPartner" << i << " = (index + " << i << "u * stride) % (" << groupSize
-                << "u * stride);\n";
-        }
-        css << "   bool idle = index >= " << groupSize << "u * stride;\n";
-    }
-
-    // An invocation is non-idle only if all its partners are active
-    if (m_params.mappingScope == SCOPE_SUBGROUP)
+    // An invocation is non-idle only if all its partners are active.
+    // Instead of returning from idle invocation, which could cause barrier divergence,
+    // idle invocations are mapped to themselves.
+    css << "   bool idle = index >= " << groupSize << "u * stride;\n";
+    if (scope == SCOPE_SUBGROUP)
     {
         css << "   uvec4 sgBallot = subgroupBallot(true);\n";
-        for (uint32_t i = 1; i <= m_params.numPartners; i++)
+        for (uint32_t i = 1; i <= partners; i++)
+        {
             css << "   idle = idle || !subgroupBallotBitExtract(sgBallot, indexPartner" << i << ");\n";
-    }
+        }
 
-    // Instead of returning from idle invocation, which could cause barrier divergence,
-    // idle invocations are mapped to themselves
-    if (m_params.numPartners > 1 || m_params.mappingScope == SCOPE_SUBGROUP)
-    {
         css << "   if (idle) {\n";
-        for (uint32_t i = 1; i <= m_params.numPartners; i++)
+        for (uint32_t i = 1; i <= partners; i++)
         {
             css << "      indexPartner" << i << " = index;\n";
         }
         css << "   }\n";
     }
 
-    // Compute 2D positions of each partner
-    for (uint32_t i = 1; i <= m_params.numPartners; i++)
+    // Compute 2D positions for each partner
+    for (uint32_t i = 1; i <= partners; i++)
     {
-        const std::string index = "indexPartner" + std::to_string(i);
-        css << "   ivec2 posPartner" << i << " = ";
-        switch (m_params.mappingScope)
-        {
-        case SCOPE_SUBGROUP:
-            css << "subgroupShuffle(pos, " << index << ");\n";
-            break;
-        case SCOPE_WORKGROUP:
-            css << "pos - pos % DIM + ivec2(" << index << " % DIM, " << index << " / DIM);\n";
-            break;
-        default:
-            css << "ivec2(" << index << " % gridDim, " << index << " / gridDim);\n";
-        }
+        const std::string indexPartner = "indexPartner" + std::to_string(i);
+        css << "   ivec2 posPartner" << i << " = " << coordPosFromIndex(scope, indexPartner) << ";\n";
     }
 
-    // Compute invocationId and coordinates for self and each partner
-    for (uint32_t i = 0; i <= m_params.numPartners; i++)
+    // Compute invocationId and coordinates for each partner
+    for (uint32_t i = 1; i <= partners; i++)
     {
-        const std::string suffix = (i == 0) ? "" : "Partner" + std::to_string(i);
-        const std::string pos    = "pos" + suffix;
-
-        css << "   uint invocationId" << suffix << " = getInvocationId(" << pos << ");\n";
-        for (const auto &buffer : m_buffers)
-            css << declareCoordinate(buffer, buffer.name + ("Coord" + suffix), pos);
-    }
-
-    if (m_params.stage == STAGE_VERTEX)
-    {
-        css << "   gl_PointSize = 1.0f;\n"
-               "   gl_Position = vec4(0.0f, 0.0f, 0.0f, 1.0f);\n";
+        const std::string pos    = "posPartner" + std::to_string(i);
+        const std::string suffix = "CoordPartner" + std::to_string(i);
+        css << "   uint invocationIdPartner" << i << " = getInvocationId(" << pos << ");\n";
+        css << initBufferCoordinates(suffix.c_str(), pos.c_str());
     }
 
     return css.str();
 }
 
-std::string MemoryModelTestCase::initLayoutWorkgroupCoordinates(const char *name) const
+std::string MemoryModelTestCase::initBufferCoordinates(const char *suffix, const char *pos) const
 {
-    DE_ASSERT((m_params.mappingScope == SCOPE_QUEUEFAMILY || m_params.mappingScope == SCOPE_DEVICE) &&
-              m_params.stage == STAGE_COMPUTE && m_params.numPartners == 1);
-
-    const BufferDef &buffer = getBuffer(name);
-    DE_ASSERT(buffer.sc != SC_WORKGROUP);
-
     std::ostringstream css;
-
-    for (uint32_t i = 1; i <= m_params.numPartners; i++)
+    for (const auto &buffer : m_buffers)
     {
-        const std::string suffix = "Partner" + std::to_string(i);
-        const std::string pos    = "groupPos" + suffix;
-
-        // Position of the first invocation in the partner's workgroup
-        css << "   ivec2 " << pos << " = pos" << suffix << " - pos" << suffix << " % DIM;\n";
-        css << declareCoordinate(buffer, buffer.name + ("GroupCoord" + suffix), pos);
+        switch (buffer.sc)
+        {
+        case SC_BUFFER:
+        case SC_PHYSBUFFER:
+            css << "   uint " << buffer.name << suffix << " = getBufferCoord(" << pos << ");\n";
+            break;
+        case SC_IMAGE:
+            css << "   ivec2 " << buffer.name << suffix << " = " << pos << ";\n";
+            break;
+        case SC_WORKGROUP:
+            css << "   uint " << buffer.name << suffix << " = getSharedCoord(" << pos << ");\n";
+            break;
+        default:
+            DE_ASSERT(0);
+        }
     }
-
     return css.str();
 }
 
 void MemoryModelTestCase::checkSupportBuffers(const Context &context) const
 {
-    for (const auto &buffer : m_buffers)
-    {
-        if (buffer.type == DATA_TYPE_FLOAT64 && buffer.sc == SC_IMAGE)
-            TCU_THROW(NotSupportedError,
-                      "VkShaderAtomicFloat64: 64-bit floating point image atomic operations not supported");
-    }
-
     if (hasDataType(DATA_TYPE_UINT64) && !context.getDeviceFeatures().shaderInt64)
-        TCU_THROW(NotSupportedError, "64-bit integer in shaders not supported");
+        TCU_THROW(NotSupportedError, "64-bit integer type is not supported");
+
+    if (hasDataType(DATA_TYPE_FLOAT64) && !context.getDeviceFeatures().shaderFloat64)
+        TCU_THROW(NotSupportedError, "64-bit floating point type is not supported");
 
     if (hasStorageClass(SC_PHYSBUFFER) && !context.isBufferDeviceAddressSupported())
         TCU_THROW(NotSupportedError, "Physical storage buffer pointers not supported");
@@ -612,6 +662,9 @@ void MemoryModelTestCase::checkSupportBuffers(const Context &context) const
 
     for (const auto &buffer : m_buffers)
     {
+        // Vulkan has no 64-bit floating point images, so the tests must not create them
+        DE_ASSERT(buffer.sc != SC_IMAGE || buffer.type != DATA_TYPE_FLOAT64);
+
         if (buffer.sc != SC_BUFFER && buffer.sc != SC_PHYSBUFFER)
             continue;
 
@@ -674,8 +727,6 @@ void MemoryModelTestCase::checkSupportStageAtomics(const Context &context) const
 void MemoryModelTestCase::checkSupportSubgroupFeatures(const Context &context) const
 {
     const VkPhysicalDeviceSubgroupProperties &subgroupProperties = context.getSubgroupProperties();
-    if (subgroupProperties.subgroupSize <= m_params.numPartners)
-        TCU_THROW(NotSupportedError, "Device does not support required subgroup size");
 
     const VkSubgroupFeatureFlags requiredOperations =
         VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
@@ -814,6 +865,55 @@ std::string MemoryModelTestCase::gl_store(const char *name, const char *idx, con
     else
         css << "imageStore(" << buffer.name << ", " << idx << ", vec4(" << gl_type(buffer.type) << "(" << value
             << "), 0, 0, 0))";
+    return css.str();
+}
+
+std::string MemoryModelTestCase::spv_load(const char *name, const char *idx) const
+{
+    const BufferDef &buffer  = getBuffer(name);
+    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER;
+
+    std::ostringstream css;
+    css << "spv_" << name << "Load(" << name << ".x[" << idx << "], " << std::showbase << std::hex << operands
+        << std::dec << ", " << alignment << ")";
+    return css.str();
+}
+
+std::string MemoryModelTestCase::spv_load(const char *name, const char *idx, const Scope scope) const
+{
+    const BufferDef &buffer  = getBuffer(name);
+    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER | SPV_MAKE_POINTER_VISIBLE;
+
+    std::ostringstream css;
+    css << "spv_" << name << "LoadVis(" << name << ".x[" << idx << "], " << std::showbase << std::hex << operands
+        << std::dec << ", " << alignment << ", " << gl_scope(scope) << ")";
+    return css.str();
+}
+
+std::string MemoryModelTestCase::spv_store(const char *name, const char *idx, const char *value) const
+{
+    const BufferDef &buffer  = getBuffer(name);
+    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER;
+
+    std::ostringstream css;
+    css << "spv_" << name << "Store(" << name << ".x[" << idx << "], " << value << ", " << std::showbase << std::hex
+        << operands << std::dec << ", " << alignment << ")";
+    return css.str();
+}
+
+std::string MemoryModelTestCase::spv_store(const char *name, const char *idx, const char *value,
+                                           const Scope scope) const
+{
+    const BufferDef &buffer  = getBuffer(name);
+    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER | SPV_MAKE_POINTER_AVAILABLE;
+
+    std::ostringstream css;
+    css << "spv_" << name << "StoreAv(" << name << ".x[" << idx << "], " << value << ", " << std::showbase << std::hex
+        << operands << std::dec << ", " << alignment << ", " << gl_scope(scope) << ")";
     return css.str();
 }
 
