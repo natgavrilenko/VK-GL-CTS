@@ -92,13 +92,13 @@ public:
     void checkSupport(Context &context) const override;
 
 private:
-    std::string declareSpirvIntrinsics() const override;
+    std::string declareSpvIntrinsics() const override;
     std::string initProgram() const override;
     const CaseDef m_data;
 };
 
 MixedAccessTestCase::MixedAccessTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {data.core11, data.stage, getMappingScope(data), 1}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {data.stage, data.core11}, createBuffers(data))
     , m_data(data)
 {
 }
@@ -128,18 +128,14 @@ void MixedAccessTestCase::checkSupport(Context &context) const
     checkSupportStageAtomics(context);
 }
 
-std::string MixedAccessTestCase::declareSpirvIntrinsics() const
+std::string MixedAccessTestCase::declareSpvIntrinsics() const
 {
     if (!usesLoadIntrinsic(m_data))
         return {};
 
-    const char *typeStr            = gl_type(getBuffer("payload").type);
-    const bool hasDeviceVisibility = m_data.visScope == SCOPE_DEVICE;
     std::ostringstream css;
     css << "#extension GL_EXT_spirv_intrinsics : enable\n"
-        << "spirv_instruction(" << (hasDeviceVisibility ? "capabilities = [5346], " : "") << "id = 61) " << typeStr
-        << " loadPayload(spirv_by_reference " << typeStr << " p, spirv_literal int memoryAccess"
-        << (m_data.visScope.has_value() ? ", int scope" : "") << ");\n";
+        << declareBufferSpvIntrinsics("payload", m_data.visScope == SCOPE_DEVICE);
     return css.str();
 }
 
@@ -149,27 +145,34 @@ std::string MixedAccessTestCase::initProgram() const
     const DataType type   = getBuffer("payload").type;
     const char *typeStr   = gl_type(type);
 
-    // Non-atomic load of the partner's payload, used for the prefetch and for the checked read
-    std::string load = gl_load("payload", "payloadCoordPartner1");
+    std::string loadPayload;
     if (usesLoadIntrinsic(m_data))
     {
-        const std::string operands = m_data.visScope ? std::string("0x30, ") + gl_scope(*m_data.visScope) : "0x20";
-        load                       = "loadPayload(payload.x[payloadCoordPartner1], " + operands + ")";
+        if (m_data.visScope.has_value())
+            loadPayload = spv_load("payload", "payloadCoordPartner", *m_data.visScope);
+        else
+            loadPayload = spv_load("payload", "payloadCoordPartner");
+    }
+    else
+    {
+        loadPayload = gl_load("payload", "payloadCoordPartner");
     }
 
     std::ostringstream css;
 
+    css << initPartnerCoordinates(getMappingScope(m_data));
+
     css << "   uint value = invocationId;\n"
         << "   " << typeStr << " r0 = 0;\n"
         << "   " << typeStr << " r1 = 0;\n"
-        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner1);\n";
+        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n";
 
     // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
-    css << "   value += " << gl_toUint(type, load) << " >> 31;\n"
+    css << "   value += " << gl_toUint(type, loadPayload) << " >> 31;\n"
         << "   " << gl_atomicStore("payload", "payloadCoord", "value", syncScope, 0) << ";\n"
-        << "   r0 = " << gl_atomicLoad("payload", "payloadCoordPartner1", syncScope, 0) << ";\n"
+        << "   r0 = " << gl_atomicLoad("payload", "payloadCoordPartner", syncScope, 0) << ";\n"
         << "   if (r0 == expected) {\n"
-        << "      r1 = " << load << ";\n"
+        << "      r1 = " << loadPayload << ";\n"
         << "      if (!idle && r1 != expected) {\n"
         << "         " << gl_store("fail", "failCoord", "1") << ";\n"
         << "      }\n"

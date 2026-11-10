@@ -84,7 +84,7 @@ private:
 };
 
 AvVisChainsTestCase::AvVisChainsTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {false, STAGE_COMPUTE, SCOPE_DEVICE, 1}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createBuffers(data))
     , m_data(data)
 {
 }
@@ -131,12 +131,14 @@ std::string AvVisChainsTestCase::initProgram() const
 
     std::ostringstream css;
 
+    css << initPartnerCoordinates(SCOPE_DEVICE)
+        << "   ivec2 groupPosPartner = posPartner - posPartner % DIM;\n"
+        << initBufferCoordinates("GroupCoordPartner", "groupPosPartner");
+
     css << "   bool skip = false;\n"
         << "   uint value = invocationId;\n"
         << "   " << typeStr << " r = 0;\n"
-        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner1);\n";
-
-    css << initLayoutWorkgroupCoordinates("guard");
+        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n";
 
     if (m_data.transitiveVis)
     {
@@ -144,7 +146,7 @@ std::string AvVisChainsTestCase::initProgram() const
     }
 
     // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
-    css << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner1")) << " >> 31;\n"
+    css << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner")) << " >> 31;\n"
         << "   " << gl_store("payload", "payloadCoord", "value") << ";\n"
         << "   " << gl_controlBarrier(SCOPE_WORKGROUP, SCOPE_WORKGROUP, semAcqRel | semAv) << ";\n"
         << "   if (all(equal(gl_LocalInvocationID.xy, ivec2(0,0)))) {\n";
@@ -161,10 +163,10 @@ std::string AvVisChainsTestCase::initProgram() const
     }
 
     if (m_data.syncType == ST_ATOMIC_ATOMIC || m_data.syncType == ST_FENCE_ATOMIC)
-        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner1", SCOPE_DEVICE, semAcq)
+        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, semAcq)
             << " == 0;\n";
     else
-        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner1", SCOPE_DEVICE, 0) << " == 0;\n"
+        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, 0) << " == 0;\n"
             << "       " << gl_memoryBarrier(SCOPE_DEVICE, semAcq | semGuard) << ";\n";
 
     if (m_data.transitiveVis)
@@ -175,7 +177,7 @@ std::string AvVisChainsTestCase::initProgram() const
             << "   skip = sharedSkip;\n";
     }
 
-    css << "   r = " << gl_load("payload", "payloadCoordPartner1") << ";\n"
+    css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
         << "   if (!idle && !skip && r != expected) { " << gl_store("fail", "failCoord", "1") << "; }\n";
 
     return css.str();
