@@ -186,12 +186,12 @@ protected:
     void checkSupportBuffers(const Context &context) const;
     void checkSupportBufferAtomics(const Context &context, const char *name) const;
     void checkSupportStageAtomics(const Context &context) const;
-    void checkSupportSubgroupFeatures(const Context &context) const;
+    void checkSupportSubgroupFeatures(const Context &context, uint32_t minSize = 2) const;
     void checkSupportSplitBarriers(const Context &context) const;
 
     // Helper function to initialize partner thread coordinates
-    std::string initPartnerCoordinates(Scope scope, const char *suffix="") const;
-    std::string initMultiPartnerCoordinates(Scope scope, uint32_t partners) const;
+    std::string initPartnerCoordinates(Scope scope, const char *suffix = "") const;
+    std::string initMultiPartnerCoordinates(Scope scope, uint32_t numPartners) const;
     std::string initBufferCoordinates(const char *suffix, const char *pos) const;
 
     // Helper functions to construct glsl instructions with respect to buffer type
@@ -222,6 +222,7 @@ protected:
     uint32_t getBufferSemantics(const char *name) const;
 
 private:
+    std::string initPartners(Scope scope, uint32_t numPartners, bool isIndexRotation, const char *suffix) const;
     bool hasStorageClass(StorageClass sc) const;
     bool hasDataType(DataType type) const;
 

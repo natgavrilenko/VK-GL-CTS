@@ -125,9 +125,7 @@ std::string AvVisChainsTestCase::initProgram() const
     const uint32_t semGuard   = getBufferSemantics("guard");
     const uint32_t semRel     = SEM_RELEASE | semPayload | SEM_AVAILABLE;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload | SEM_VISIBLE;
-
-    // Additional SEM_SHARED semantics orders accesses to sharedSkip
-    const uint32_t semAcqRel = SEM_ACQUIRE_RELEASE | semPayload | (m_data.transitiveVis ? SEM_SHARED : 0);
+    const uint32_t semAcqRel  = SEM_ACQUIRE_RELEASE | semPayload;
 
     std::ostringstream css;
 
@@ -139,11 +137,6 @@ std::string AvVisChainsTestCase::initProgram() const
         << "   uint value = invocationId;\n"
         << "   " << typeStr << " r = 0;\n"
         << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n";
-
-    if (m_data.transitiveVis)
-    {
-        css << "   sharedSkip = false;\n";
-    }
 
     // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
     css << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner")) << " >> 31;\n"
@@ -171,14 +164,17 @@ std::string AvVisChainsTestCase::initProgram() const
 
     if (m_data.transitiveVis)
     {
+        // SEM_SHARED semantics in the control barrier orders accesses to sharedSkip
         css << "       sharedSkip = skip;\n"
             << "   }\n"
-            << "   " << gl_controlBarrier(SCOPE_WORKGROUP, SCOPE_WORKGROUP, semAcqRel | semVis) << ";\n"
+            << "   " << gl_controlBarrier(SCOPE_WORKGROUP, SCOPE_WORKGROUP, SEM_SHARED | semAcqRel | semVis) << ";\n"
             << "   skip = sharedSkip;\n";
     }
 
-    css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
-        << "   if (!idle && !skip && r != expected) { " << gl_store("fail", "failCoord", "1") << "; }\n";
+    css << "   if (!idle && !skip) {\n"
+        << "      r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
+        << "      if (r != expected) { " << gl_store("fail", "failCoord", "1") << "; }\n"
+        << "   }\n";
 
     return css.str();
 }

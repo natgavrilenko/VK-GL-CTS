@@ -90,7 +90,7 @@ void TransitiveSemanticsTestCase::checkSupport(Context &context) const
         TCU_THROW(NotSupportedError, "vulkanMemoryModel not supported");
 
     if (m_data.scope == SCOPE_SUBGROUP)
-        checkSupportSubgroupFeatures(context);
+        checkSupportSubgroupFeatures(context, 3);
 
     checkSupportBuffers(context);
     checkSupportBufferAtomics(context, "guard1");
