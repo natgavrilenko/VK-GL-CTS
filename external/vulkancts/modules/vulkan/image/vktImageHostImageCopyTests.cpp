@@ -1143,7 +1143,7 @@ tcu::TestStatus HostImageCopyTestInstance::iterate(void)
                         << (int)((uint8_t *)resultBuffer.getDataPtr())[i] << tcu::TestLog::EndMessage;
 
                     // The output buffers hold one mip level of one layer
-                    const auto fbExtent = tcu::IVec3(mipImageSize.width, mipImageSize.height, 1);
+                    const auto fbExtent = tcu::IVec3(mipImageSize.width, mipImageSize.height, mipImageSize.depth);
                     const auto testColorAccess =
                         tcu::ConstPixelBufferAccess(mapVkFormat(m_parameters.imageOutputFormat), fbExtent, data.data());
                     const auto outputColorAccess = tcu::ConstPixelBufferAccess(
@@ -1192,7 +1192,7 @@ tcu::TestStatus HostImageCopyTestInstance::iterate(void)
         if (!match)
         {
             // The output buffers hold one mip level of one layer
-            const auto fbExtent = tcu::IVec3(mipImageSize.width, mipImageSize.height, 1);
+            const auto fbExtent = tcu::IVec3(mipImageSize.width, mipImageSize.height, mipImageSize.depth);
             const auto testColorAccess =
                 tcu::ConstPixelBufferAccess(mapVkFormat(m_parameters.imageOutputFormat), fbExtent, testData.data());
             const auto outputColorAccess = tcu::ConstPixelBufferAccess(mapVkFormat(m_parameters.imageOutputFormat),
@@ -1596,13 +1596,13 @@ tcu::TestStatus PreinitializedTestInstance::queuePass(const vkt::QueueData &queu
     getHostImageCopyProperties(instanceDriver, physicalDevice, &hostImageCopyProperties);
     if (hostImageCopyProperties.identicalMemoryTypeRequirements)
     {
-        createInfo.flags &= ~(vk::VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT);
-        de::MovePtr<ImageWithMemory> imageWithoutHostCopy = de::MovePtr<ImageWithMemory>(
-            new ImageWithMemory(vk, device, alloc, createInfo, vk::MemoryRequirement::HostVisible));
+        // Only the memory requirements of this image are queried, so it needs no memory.
+        createInfo.usage &= ~(vk::VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT);
+        const auto imageWithoutHostCopy = createImage(vk, device, &createInfo);
         vk::VkMemoryRequirements hostImageMemoryRequirements;
         vk::VkMemoryRequirements memoryRequirements;
         vk.getImageMemoryRequirements(device, **image, &hostImageMemoryRequirements);
-        vk.getImageMemoryRequirements(device, **imageWithoutHostCopy, &memoryRequirements);
+        vk.getImageMemoryRequirements(device, *imageWithoutHostCopy, &memoryRequirements);
 
         if (hostImageMemoryRequirements.memoryTypeBits != memoryRequirements.memoryTypeBits)
             TCU_THROW(NotSupportedError, "Layout not supported for src host copy");
@@ -2210,19 +2210,6 @@ void QueryTestCase::checkSupport(vkt::Context &context) const
     if (m_tiling == VK_IMAGE_TILING_LINEAR &&
         (formatProperties3.linearTilingFeatures & vk::VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT) == 0)
         TCU_THROW(NotSupportedError, "Format feature sampled image bit not supported for linear tiling.");
-}
-
-// Depth/stencil buffer to image copies are graphics-only and on a graphics-less device no family can legally record them
-void checkDepthStencilCopyQueueSupport(vkt::Context &context, bool copiesDepthStencilAspect)
-{
-    if (!copiesDepthStencilAspect)
-        return;
-
-    const InstanceInterface &vki = context.getInstanceInterface();
-    const auto queueProps        = getPhysicalDeviceQueueFamilyProperties(vki, context.getPhysicalDevice());
-
-    if ((queueProps[context.getUniversalQueueFamilyIndex()].queueFlags & vk::VK_QUEUE_GRAPHICS_BIT) == 0u)
-        TCU_THROW(NotSupportedError, "Depth/stencil buffer to image copy requires a graphics queue");
 }
 
 class IdenticalMemoryLayoutTestInstance : public vkt::MultiQueueRunnerTestInstance
@@ -3417,8 +3404,9 @@ tcu::TestStatus HostImageArrayCopyTestInstance::iterate(void)
                 log << tcu::TestLog::Message << "At byte " << i << " generated data is " << testData[i]
                     << ", but output data is " << (int)outputData[i] << tcu::TestLog::EndMessage;
 
-                const auto fbExtent =
-                    tcu::IVec3(createInfo.extent.width, createInfo.extent.height, createInfo.extent.depth);
+                // testData and outputData hold the copied region of each layer, not the whole image
+                const auto fbExtent = tcu::IVec3(m_params.copyExtent.width, m_params.copyExtent.height,
+                                                 m_params.copyExtent.depth * m_params.arrayLayers);
                 const auto testColorAccess =
                     tcu::ConstPixelBufferAccess(mapVkFormat(m_params.format), fbExtent, testData.data());
                 const auto outputColorAccess =
