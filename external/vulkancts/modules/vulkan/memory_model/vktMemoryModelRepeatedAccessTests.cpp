@@ -21,7 +21,7 @@
  * \brief Memory Model Repeated Access Tests
  *//*--------------------------------------------------------------------*/
 
-#include "vktMemoryModelShadowedStoreIncrementTests.hpp"
+#include "vktMemoryModelRepeatedAccessTests.hpp"
 #include "vktMemoryModelTestCase.hpp"
 #include "vktMemoryModelUtil.hpp"
 
@@ -46,11 +46,9 @@ struct CaseDef
     StorageClass payloadSC;
     StorageClass guard1SC;
     StorageClass guard2SC;
-    DataType payloadType;
-    DataType guard1Type;
-    DataType guard2Type;
     Scope scopeNear;
     Scope scopeFar;
+    DataType dataType;
     Stage stage;
 };
 
@@ -76,9 +74,9 @@ int scopeWidth(Scope scope)
 
 std::vector<BufferDef> createBuffers(const CaseDef &data)
 {
-    return std::vector<BufferDef>{{"payload", MEM_NONE, data.payloadSC, data.payloadType, data.payloadMemLocal},
-                                  {"guard1", MEM_NONE, data.guard1SC, data.guard1Type, data.guard1MemLocal},
-                                  {"guard2", MEM_NONE, data.guard2SC, data.guard2Type, data.guard2MemLocal},
+    return std::vector<BufferDef>{{"payload", MEM_NONE, data.payloadSC, data.dataType, data.payloadMemLocal},
+                                  {"guard1", MEM_NONE, data.guard1SC, data.dataType, data.guard1MemLocal},
+                                  {"guard2", MEM_NONE, data.guard2SC, data.dataType, data.guard2MemLocal},
                                   {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
@@ -307,9 +305,9 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
 
     const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
 
-    for (const auto &[sc0, sc1, sc2, local0, local1, local2, type0, type1, type2, scope0, scope1, stage] :
-         Combinations(scCases, scCases, scCases, localCases, localCases, localCases, typeCases, typeCases, typeCases,
-                      scopeCases, scopeCases, stageCases))
+    for (const auto &[sc0, sc1, sc2, local0, local1, local2, scope0, scope1, type, stage] :
+         Combinations(scCases, scCases, scCases, localCases, localCases, localCases, scopeCases, scopeCases, typeCases,
+                      stageCases))
     {
         const CaseDef c = {
             local0.value, // bool payloadMemLocal;
@@ -318,15 +316,13 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
             sc0.value,    // StorageClass payloadSC;
             sc1.value,    // StorageClass guard1SC;
             sc2.value,    // StorageClass guard2SC;
-            type0.value,  // DataType payloadType;
-            type1.value,  // DataType guard1Type;
-            type2.value,  // DataType guard2Type;
             scope0.value, // Scope scopeNear;
             scope1.value, // Scope scopeFar;
+            type.value,   // DataType dataType;
             stage.value,  // Stage stage;
         };
 
-        // Near scope must be strictly narrower than far scope
+        // Near scope should be strictly narrower than far scope
         if (scopeWidth(c.scopeNear) >= scopeWidth(c.scopeFar))
         {
             continue;
@@ -367,9 +363,8 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
         addTestCase(root,
                     {patternName, groupName("payload", sc0.name), groupName("guard1", sc1.name),
                      groupName("guard2", sc2.name), groupName("payload", local0.name), groupName("guard1", local1.name),
-                     groupName("guard2", local2.name), groupName("payload", type0.name),
-                     groupName("guard1", type1.name), groupName("guard2", type2.name), groupName("near", scope0.name),
-                     groupName("far", scope1.name)},
+                     groupName("guard2", local2.name), groupName("near", scope0.name), groupName("far", scope1.name),
+                     type.name},
                     new PatternTestCase(root.getTestContext(), stage.name, c));
     }
 }

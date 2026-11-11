@@ -130,42 +130,51 @@ const char *gl_qualifier(const MemQualifier qual)
     }
 }
 
-const char *coordBlockSize(const Scope scope)
+glu::ShaderType getShaderType(const Stage stage)
 {
-    switch (scope)
+    switch (stage)
     {
-    case SCOPE_SUBGROUP:
-        return "gl_SubgroupSize";
-    case SCOPE_WORKGROUP:
-        return "DIM * DIM";
+    case STAGE_COMPUTE:
+        return glu::SHADERTYPE_COMPUTE;
+    case STAGE_VERTEX:
+        return glu::SHADERTYPE_VERTEX;
+    case STAGE_FRAGMENT:
+        return glu::SHADERTYPE_FRAGMENT;
     default:
-        return "gridDim * gridDim";
+        DE_ASSERT(0);
+        return glu::SHADERTYPE_LAST;
     }
 }
 
-const char *coordIndex(const Scope scope)
+VkShaderStageFlagBits getShaderStageFlag(const Stage stage)
 {
-    switch (scope)
+    switch (stage)
     {
-    case SCOPE_SUBGROUP:
-        return "gl_SubgroupInvocationID";
-    case SCOPE_WORKGROUP:
-        return "uint((pos.y % DIM) * DIM + pos.x % DIM)";
+    case STAGE_COMPUTE:
+        return VK_SHADER_STAGE_COMPUTE_BIT;
+    case STAGE_VERTEX:
+        return VK_SHADER_STAGE_VERTEX_BIT;
+    case STAGE_FRAGMENT:
+        return VK_SHADER_STAGE_FRAGMENT_BIT;
     default:
-        return "pos.y * gridDim + pos.x";
+        DE_ASSERT(0);
+        return VK_SHADER_STAGE_ALL;
     }
 }
 
-std::string coordPosFromIndex(const Scope scope, const std::string index)
+VkPipelineStageFlagBits getPipelineStageFlag(const Stage stage)
 {
-    switch (scope)
+    switch (stage)
     {
-    case SCOPE_SUBGROUP:
-        return "subgroupShuffle(pos, " + index + ")";
-    case SCOPE_WORKGROUP:
-        return "pos - pos % DIM + ivec2(" + index + " % DIM, " + index + " / DIM)";
+    case STAGE_COMPUTE:
+        return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    case STAGE_VERTEX:
+        return VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+    case STAGE_FRAGMENT:
+        return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     default:
-        return "ivec2(" + index + " % gridDim, " + index + " / gridDim)";
+        DE_ASSERT(0);
+        return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     }
 }
 
@@ -174,136 +183,6 @@ MemoryRequirement getBufferMemoryRequirement(const BufferDef &buffer, bool isDev
     const bool deviceAddress = isDeviceAddressSupported && buffer.sc == SC_PHYSBUFFER;
     return (deviceAddress ? MemoryRequirement::DeviceAddress : MemoryRequirement::Any) |
            (buffer.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal);
-}
-
-VkImageCreateInfo makeImageCreateInfo(const VkFormat format, const uint32_t width, const uint32_t height,
-                                      const VkImageUsageFlags usage)
-{
-    return {
-        VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, // VkStructureType sType;
-        nullptr,                             // const void* pNext;
-        (VkImageCreateFlags)0u,              // VkImageCreateFlags flags;
-        VK_IMAGE_TYPE_2D,                    // VkImageType imageType;
-        format,                              // VkFormat format;
-        makeExtent3D(width, height, 1u),     // VkExtent3D extent;
-        1u,                                  // uint32_t mipLevels;
-        1u,                                  // uint32_t arrayLayers;
-        VK_SAMPLE_COUNT_1_BIT,               // VkSampleCountFlagBits samples;
-        VK_IMAGE_TILING_OPTIMAL,             // VkImageTiling tiling;
-        usage,                               // VkImageUsageFlags usage;
-        VK_SHARING_MODE_EXCLUSIVE,           // VkSharingMode sharingMode;
-        0u,                                  // uint32_t queueFamilyIndexCount;
-        nullptr,                             // const uint32_t* pQueueFamilyIndices;
-        VK_IMAGE_LAYOUT_UNDEFINED            // VkImageLayout initialLayout;
-    };
-}
-
-// The fragment stage is optional: it is left out when fragmentModule is VK_NULL_HANDLE
-Move<VkPipeline> makeGraphicsPipeline(const DeviceInterface &vk, const VkDevice device,
-                                      const VkPipelineLayout pipelineLayout, const VkShaderModule vertexModule,
-                                      const VkShaderModule fragmentModule, const VkRenderPass renderPass,
-                                      const VkViewport *viewport, const VkRect2D *scissor,
-                                      const VkPrimitiveTopology topology, const VkBool32 rasterizerDiscardEnable,
-                                      const VkSpecializationInfo *specInfo)
-{
-    const VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo = {
-        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, // VkStructureType sType;
-        nullptr,                                                   // const void* pNext;
-        (VkPipelineVertexInputStateCreateFlags)0,                  // VkPipelineVertexInputStateCreateFlags flags;
-        0u,                                                        // uint32_t vertexBindingDescriptionCount;
-        nullptr, // const VkVertexInputBindingDescription* pVertexBindingDescriptions;
-        0u,      // uint32_t vertexAttributeDescriptionCount;
-        nullptr  // const VkVertexInputAttributeDescription* pVertexAttributeDescriptions;
-    };
-
-    const VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo = {
-        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, // VkStructureType sType;
-        nullptr,                                                     // const void* pNext;
-        (VkPipelineInputAssemblyStateCreateFlags)0,                  // VkPipelineInputAssemblyStateCreateFlags flags;
-        topology,                                                    // VkPrimitiveTopology topology;
-        VK_FALSE                                                     // VkBool32 primitiveRestartEnable;
-    };
-
-    const VkPipelineRasterizationStateCreateInfo rasterizationStateCreateInfo = {
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, // VkStructureType sType;
-        nullptr,                                                    // const void* pNext;
-        (VkPipelineRasterizationStateCreateFlags)0,                 // VkPipelineRasterizationStateCreateFlags flags;
-        VK_FALSE,                                                   // VkBool32 depthClampEnable;
-        rasterizerDiscardEnable,                                    // VkBool32 rasterizerDiscardEnable;
-        VK_POLYGON_MODE_FILL,                                       // VkPolygonMode polygonMode;
-        VK_CULL_MODE_NONE,                                          // VkCullModeFlags cullMode;
-        VK_FRONT_FACE_CLOCKWISE,                                    // VkFrontFace frontFace;
-        VK_FALSE,                                                   // VkBool32 depthBiasEnable;
-        0.0f,                                                       // float depthBiasConstantFactor;
-        0.0f,                                                       // float depthBiasClamp;
-        0.0f,                                                       // float depthBiasSlopeFactor;
-        1.0f                                                        // float lineWidth;
-    };
-
-    const VkPipelineMultisampleStateCreateInfo multisampleStateCreateInfo = {
-        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, // VkStructureType sType
-        nullptr,                                                  // const void* pNext
-        0u,                                                       // VkPipelineMultisampleStateCreateFlags flags
-        VK_SAMPLE_COUNT_1_BIT,                                    // VkSampleCountFlagBits rasterizationSamples
-        VK_FALSE,                                                 // VkBool32 sampleShadingEnable
-        1.0f,                                                     // float minSampleShading
-        nullptr,                                                  // const VkSampleMask* pSampleMask
-        VK_FALSE,                                                 // VkBool32 alphaToCoverageEnable
-        VK_FALSE                                                  // VkBool32 alphaToOneEnable
-    };
-
-    const VkPipelineViewportStateCreateInfo viewportStateCreateInfo = {
-        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, // VkStructureType sType
-        nullptr,                                               // const void* pNext
-        (VkPipelineViewportStateCreateFlags)0,                 // VkPipelineViewportStateCreateFlags flags
-        1u,                                                    // uint32_t viewportCount
-        viewport,                                              // const VkViewport* pViewports
-        1u,                                                    // uint32_t scissorCount
-        scissor                                                // const VkRect2D* pScissors
-    };
-
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
-    shaderStages.push_back({
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, (VkPipelineShaderStageCreateFlags)0,
-        VK_SHADER_STAGE_VERTEX_BIT, // stage
-        vertexModule,               // shader
-        "main",
-        specInfo, // pSpecializationInfo
-    });
-    if (fragmentModule != VK_NULL_HANDLE)
-    {
-        shaderStages.push_back({
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, (VkPipelineShaderStageCreateFlags)0,
-            VK_SHADER_STAGE_FRAGMENT_BIT, // stage
-            fragmentModule,               // shader
-            "main",
-            specInfo, // pSpecializationInfo
-        });
-    }
-
-    const VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = {
-        VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, // VkStructureType sType;
-        nullptr,                                         // const void* pNext;
-        (VkPipelineCreateFlags)0,                        // VkPipelineCreateFlags flags;
-        static_cast<uint32_t>(shaderStages.size()),      // uint32_t stageCount;
-        shaderStages.data(),                             // const VkPipelineShaderStageCreateInfo* pStages;
-        &vertexInputStateCreateInfo,   // const VkPipelineVertexInputStateCreateInfo* pVertexInputState;
-        &inputAssemblyStateCreateInfo, // const VkPipelineInputAssemblyStateCreateInfo* pInputAssemblyState;
-        nullptr,                       // const VkPipelineTessellationStateCreateInfo* pTessellationState;
-        &viewportStateCreateInfo,      // const VkPipelineViewportStateCreateInfo* pViewportState;
-        &rasterizationStateCreateInfo, // const VkPipelineRasterizationStateCreateInfo* pRasterizationState;
-        &multisampleStateCreateInfo,   // const VkPipelineMultisampleStateCreateInfo* pMultisampleState;
-        nullptr,                       // const VkPipelineDepthStencilStateCreateInfo* pDepthStencilState;
-        nullptr,                       // const VkPipelineColorBlendStateCreateInfo* pColorBlendState;
-        nullptr,                       // const VkPipelineDynamicStateCreateInfo* pDynamicState;
-        pipelineLayout,                // VkPipelineLayout layout;
-        renderPass,                    // VkRenderPass renderPass;
-        0u,                            // uint32_t subpass;
-        VK_NULL_HANDLE,                // VkPipeline basePipelineHandle;
-        0                              // int basePipelineIndex;
-    };
-
-    return createGraphicsPipeline(vk, device, VK_NULL_HANDLE, &graphicsPipelineCreateInfo);
 }
 
 } // namespace
@@ -329,9 +208,11 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
     // Can be overridden by a child class, empty by default
     css << declareSpvIntrinsics();
 
-    css << "// DIM/NUM_WORKGROUP_EACH_DIM overriden by spec constants\n"
+    // A workgroup has DIM x DIM invocations, the grid has gridDim x gridDim invocations
+    css << "// DIM/NUM_WORKGROUP_EACH_DIM overridden by spec constants\n"
            "layout(constant_id = 0) const int DIM = 1;\n"
-           "layout(constant_id = 1) const int NUM_WORKGROUP_EACH_DIM = 1;\n";
+           "layout(constant_id = 1) const int NUM_WORKGROUP_EACH_DIM = 1;\n"
+           "const uint gridDim = uint(DIM * NUM_WORKGROUP_EACH_DIM);\n";
 
     // Can be overridden by a child class, empty by default
     css << declareSharedVariables();
@@ -341,21 +222,27 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
         css << "layout(local_size_x_id = 0, local_size_y_id = 0, local_size_z = 1) in;\n";
     }
 
+    // Declare layout and collect push constant block for physical storage buffer
+    std::ostringstream pcs;
     for (size_t i = 0; i < m_buffers.size(); i++)
     {
         const auto &buffer = m_buffers[i];
+        const char *name   = buffer.name;
+
         switch (buffer.sc)
         {
         case SC_PHYSBUFFER:
         {
-            css << "layout(buffer_reference) buffer T" << buffer.name << "Ref { " << gl_type(buffer.type)
-                << " x[]; };\n";
+            const char *ref = buffer.qual == MEM_NONE ? "" : "ref";
+            css << "layout(buffer_reference) buffer T" << name << "Ref { " << gl_type(buffer.type) << " x[]; };\n";
+            pcs << "layout(offset = " << (i * DEVICE_ADDRESS_SIZE) << ") T" << name << "Ref " << name << ref << ";\n";
             break;
         }
         case SC_BUFFER:
         {
-            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(buffer.qual) << " buffer T" << buffer.name
-                << " { " << gl_type(buffer.type) << " x[]; } " << buffer.name << ";\n";
+            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(buffer.qual) << " buffer T" << name << " {\n"
+                << "   " << gl_type(buffer.type) << " x[];\n"
+                << "} " << name << ";\n";
             break;
         }
         case SC_IMAGE:
@@ -363,13 +250,13 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
             const char *type1 = isIntType(buffer.type) ? "r32ui" : "r32f";
             const char *type2 = isIntType(buffer.type) ? "uimage2D" : "image2D";
             css << "layout(set=0, binding=" << i << ", " << type1 << ") uniform " << gl_qualifier(buffer.qual) << " "
-                << type2 << " " << buffer.name << ";\n";
+                << type2 << " " << name << ";\n";
             break;
         }
         case SC_WORKGROUP:
         {
-            css << "struct S" << buffer.name << " { " << gl_type(buffer.type) << " x[DIM*DIM]; };\n"
-                << "shared S" << buffer.name << " " << buffer.name << ";\n";
+            css << "struct S" << name << " { " << gl_type(buffer.type) << " x[DIM*DIM]; };\n"
+                << "shared S" << name << " " << name << ";\n";
             break;
         }
         default:
@@ -379,22 +266,12 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
 
     if (hasStorageClass(SC_PHYSBUFFER))
     {
-        css << "layout (push_constant, std430) uniform PC {\n";
-        for (size_t i = 0; i < m_buffers.size(); i++)
-        {
-            if (m_buffers[i].sc == SC_PHYSBUFFER)
-            {
-                const char *suffix = m_buffers[i].qual == MEM_NONE ? "" : "ref";
-                css << "layout(offset = " << (i * DEVICE_ADDRESS_SIZE) << ") T" << m_buffers[i].name << "Ref "
-                    << m_buffers[i].name << suffix << ";\n";
-            }
-        }
-        css << "};\n";
+        css << "layout (push_constant, std430) uniform PC {\n" << pcs.str() << "};\n";
     }
 
-    // Declare functions to compute invocation ID and coordinates.
-    // Incremented invocationIds by one to avoid collisions with initial zero.
-    css << "uint getInvocationId(ivec2 pos) { return uint(pos.y * DIM * NUM_WORKGROUP_EACH_DIM + pos.x) + 1u; }\n"
+    // Declare functions to compute invocation ID and coordinates, increment invocationIds by one
+    // to avoid collisions with initial zero
+    css << "uint getInvocationId(ivec2 pos) { return uint(pos.y * gridDim + pos.x) + 1u; }\n"
         << "uint getSharedCoord(ivec2 pos) { return uint((pos.y % DIM) * DIM + pos.x % DIM); }\n"
         << "uint getBufferCoord(ivec2 pos) { return uint((pos.y / DIM * NUM_WORKGROUP_EACH_DIM + pos.x / DIM) * "
            "DIM * DIM) + getSharedCoord(pos); }\n";
@@ -402,19 +279,29 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
     css << "void main()\n"
            "{\n";
 
-    if (m_params.stage == STAGE_FRAGMENT)
+    // Stage-specific setup, and the invocation's 2D position (global ID)
+    switch (m_params.stage)
     {
+    case STAGE_COMPUTE:
+        css << "   ivec2 pos = ivec2(gl_GlobalInvocationID.xy);\n";
+        break;
+    case STAGE_VERTEX:
+        css << "   gl_PointSize = 1.0f;\n"
+               "   gl_Position = vec4(0.0f, 0.0f, 0.0f, 1.0f);\n"
+               "   ivec2 pos = ivec2(gl_VertexIndex % gridDim, gl_VertexIndex / gridDim);\n";
+        break;
+    case STAGE_FRAGMENT:
         // Kill helper invocations so they don't load outside the bounds of the SSBO.
         // Helper pixels are also initially "active" and if a thread gets one as its
         // partner in SCOPE_SUBGROUP mode, it can't run the test.
-        css << "   if (gl_HelperInvocation) { return; }\n";
+        css << "   if (gl_HelperInvocation) { return; }\n"
+            << "   ivec2 pos = ivec2(gl_FragCoord.xy);\n";
+        break;
+    default:
+        DE_ASSERT(0);
     }
 
-    if (m_params.stage == STAGE_VERTEX)
-    {
-        css << "   gl_PointSize = 1.0f;\n"
-               "   gl_Position = vec4(0.0f, 0.0f, 0.0f, 1.0f);\n";
-    }
+    css << "   uint invocationId = getInvocationId(pos);\n";
 
     for (const auto &buffer : m_buffers)
     {
@@ -425,70 +312,35 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
         }
     }
 
-    // TODO: Better place for it? Reuse in getInvocationId and getBufferCoord?
-    css << "   uint gridDim = DIM * NUM_WORKGROUP_EACH_DIM;\n";
+    css << initBufferCoordinates("Coord", "pos");
 
-    // Compute thread's 2D position (global ID).
-    switch (m_params.stage)
+    // Initialize shared memory
+    for (const auto &buffer : m_buffers)
     {
-    case STAGE_COMPUTE:
-        css << "   ivec2 pos = ivec2(gl_GlobalInvocationID.xy);\n";
-        break;
-    case STAGE_VERTEX:
-        css << "   ivec2 pos = ivec2(gl_VertexIndex % gridDim, gl_VertexIndex / gridDim);\n";
-        break;
-    case STAGE_FRAGMENT:
-        css << "   ivec2 pos = ivec2(gl_FragCoord.xy);\n";
-        break;
-    default:
-        DE_ASSERT(0);
+        if (buffer.sc == SC_WORKGROUP)
+            css << "   " << buffer.name << ".x[" << buffer.name << "Coord] = 0;\n";
     }
-
-    css << "   uint invocationId = getInvocationId(pos);\n"
-        << initBufferCoordinates("Coord", "pos");
 
     if (hasStorageClass(SC_WORKGROUP))
-    {
-        for (const auto &buffer : m_buffers)
-        {
-            if (buffer.sc == SC_WORKGROUP)
-            {
-                css << "   " << buffer.name << ".x[" << buffer.name << "Coord] = 0;\n";
-            }
-        }
         css << "   barrier();\n";
-    }
 
-    // Implemented by a child class
+    // Test logic, implemented by a child class
     css << initProgram();
 
     css << "}\n";
 
+    // Build shaders
+    const vk::ShaderBuildOptions buildOptions(programCollection.usedVulkanVersion, vk::SPIRV_VERSION_1_3, 0u);
+    programCollection.glslSources.add("test")
+        << glu::ShaderSource(getShaderType(m_params.stage), css.str()) << buildOptions;
+
     if (m_params.stage == STAGE_FRAGMENT)
     {
         // Draw a fullscreen triangle strip based on gl_VertexIndex
-        std::ostringstream vss;
-        vss << "#version 450 core\n"
-               "vec2 coords[4] = {ivec2(-1,-1), ivec2(-1, 1), ivec2(1, -1), ivec2(1, 1)};\n"
-               "void main() { gl_Position = vec4(coords[gl_VertexIndex], 0, 1); }\n";
-        programCollection.glslSources.add("vert") << glu::VertexSource(vss.str());
-    }
-
-    const vk::ShaderBuildOptions buildOptions(programCollection.usedVulkanVersion, vk::SPIRV_VERSION_1_3, 0u);
-
-    switch (m_params.stage)
-    {
-    case STAGE_COMPUTE:
-        programCollection.glslSources.add("test") << glu::ComputeSource(css.str()) << buildOptions;
-        break;
-    case STAGE_VERTEX:
-        programCollection.glslSources.add("test") << glu::VertexSource(css.str()) << buildOptions;
-        break;
-    case STAGE_FRAGMENT:
-        programCollection.glslSources.add("test") << glu::FragmentSource(css.str()) << buildOptions;
-        break;
-    default:
-        DE_ASSERT(0);
+        static const char *vertShader = "#version 450 core\n"
+                                        "vec2 coords[4] = {ivec2(-1,-1), ivec2(-1, 1), ivec2(1, -1), ivec2(1, 1)};\n"
+                                        "void main() { gl_Position = vec4(coords[gl_VertexIndex], 0, 1); }\n";
+        programCollection.glslSources.add("vert") << glu::VertexSource(vertShader);
     }
 }
 
@@ -527,93 +379,113 @@ std::string MemoryModelTestCase::declareBufferSpvIntrinsics(const char *name, co
 
 std::string MemoryModelTestCase::initPartnerCoordinates(const Scope scope, const char *suffix) const
 {
-    const std::string size = std::string{"size"} + suffix;
-    const std::string index = std::string{"index"} + suffix;
-    const std::string indexPartner = std::string{"indexPartner"} + suffix;
-    const std::string idle = std::string{"idle"} + suffix;
-    const std::string sgBallot = std::string{"sgBallot"} + suffix;
-    const std::string posPartner = std::string{"posPartner"} + suffix;
-    const std::string invocationIdPartner = std::string{"invocationIdPartner"} + suffix;
-    const std::string suffixCoordPartner = std::string{"CoordPartner"} + suffix;
-
-    std::ostringstream css;
-
-    css << "   uint " << size << " = " << coordBlockSize(scope) << ";\n"
-           "   uint " << index << " = " << coordIndex(scope) << ";\n"
-           "   uint " << indexPartner << " = " << size << " - 1u - " << index << ";\n"
-           "   bool " << idle << " = false;\n";
-
-    // An invocation is idle if its partner is inactive.
-    // Instead of returning from idle invocation, which could cause barrier divergence,
-    // idle invocations are mapped to themselves.
-    if (scope == SCOPE_SUBGROUP)
-    {
-        css << "   uvec4 " << sgBallot << " = subgroupBallot(true);\n"
-            << "   " << idle << " = " << idle << " || !subgroupBallotBitExtract(" << sgBallot << ", "<< indexPartner << ");\n"
-            << "   if (" << idle << ") {\n"
-            << "      " << indexPartner << " = " << index << ";\n"
-            << "   }\n";
-    }
-
-    css << "   ivec2 " << posPartner << " = " << coordPosFromIndex(scope, indexPartner) << ";\n";
-
-    // Compute invocationId and coordinates for each partner
-    css << "   uint " << invocationIdPartner << " = getInvocationId(" << posPartner << ");\n";
-    css << initBufferCoordinates(suffixCoordPartner.c_str(), posPartner.c_str());
-
-    return css.str();
+    return initPartners(scope, 1, false, suffix);
 }
 
-std::string MemoryModelTestCase::initMultiPartnerCoordinates(const Scope scope, const uint32_t partners) const
+std::string MemoryModelTestCase::initMultiPartnerCoordinates(const Scope scope, const uint32_t numPartners) const
 {
-    DE_ASSERT(partners >= 1);
+    return initPartners(scope, numPartners, true, "");
+}
 
-    std::ostringstream css;
+std::string MemoryModelTestCase::initPartners(const Scope scope, const uint32_t numPartners, const bool isIndexRotation,
+                                              const char *suffix) const
+{
+    DE_ASSERT(numPartners >= 1 && (isIndexRotation || numPartners == 1));
 
-    const uint32_t groupSize = partners + 1;
-    css << "   uint size = " << coordBlockSize(scope) << ";\n"
-        << "   uint index = " << coordIndex(scope) << ";\n"
-        << "   uint stride = size / " << groupSize << "u;\n";
+    // Helpers to concatenate variable names with a suffix
+    const auto var        = [suffix](const char *name) { return std::string{name} + suffix; };
+    const auto partnerVar = [&](const char *name, const uint32_t i)
+    { return var(name) + (numPartners > 1 ? std::to_string(i) : std::string{}); };
 
-    for (uint32_t i = 1; i <= partners; i++)
+    // Group size is the number of partners plus the invocation itself
+    const uint32_t groupSize = numPartners + 1;
+
+    // Partners are taken from a block of invocations given by the scope: blockSize is the number of invocations
+    // in the block, blockIndex the index of this invocation in it, and blockPos the position of a given index
+    const char *blockSize                             = nullptr;
+    const char *blockIndex                            = nullptr;
+    std::string (*blockPos)(const std::string &index) = nullptr;
+
+    // Mirroring fragments over the whole grid would put the partners of nearly every pair into different triangles
+    // of the fullscreen strip, where they are unlikely to be shaded concurrently. Fragment shaders therefore take
+    // their queue family and device scope partners from the DIM x DIM tile, as for a workgroup.
+    const bool isTileBlock = (m_params.stage == STAGE_FRAGMENT && scope != SCOPE_SUBGROUP);
+    const Scope blockScope = isTileBlock ? SCOPE_WORKGROUP : scope;
+
+    switch (blockScope)
     {
-        css << "   uint indexPartner" << i << " = (index + " << i << "u * stride) % (" << groupSize << "u * stride);\n";
+    case SCOPE_SUBGROUP:
+        blockSize  = "gl_SubgroupSize";
+        blockIndex = "gl_SubgroupInvocationID";
+        blockPos   = [](const std::string &index) { return "subgroupShuffle(pos, " + index + ")"; };
+        break;
+    case SCOPE_WORKGROUP:
+        blockSize  = "DIM * DIM";
+        blockIndex = "uint((pos.y % DIM) * DIM + pos.x % DIM)";
+        blockPos   = [](const std::string &index)
+        { return "pos - pos % DIM + ivec2(" + index + " % DIM, " + index + " / DIM)"; };
+        break;
+    default:
+        // Queue family and device scope use the whole grid in compute and vertex shaders
+        blockSize  = "gridDim * gridDim";
+        blockIndex = "pos.y * gridDim + pos.x";
+        blockPos   = [](const std::string &index) { return "ivec2(" + index + " % gridDim, " + index + " / gridDim)"; };
+        break;
     }
 
-    // An invocation is non-idle only if all its partners are active.
-    // Instead of returning from idle invocation, which could cause barrier divergence,
-    // idle invocations are mapped to themselves.
-    css << "   bool idle = index >= " << groupSize << "u * stride;\n";
+    std::ostringstream css;
+    css << "   uint " << var("size") << " = " << blockSize << ";\n"
+        << "   uint " << var("index") << " = " << blockIndex << ";\n";
+
+    if (isIndexRotation)
+    {
+        // Rotate each partner's index by stride
+        css << "   uint " << var("stride") << " = " << var("size") << " / " << groupSize << "u;\n";
+        for (uint32_t i = 1; i <= numPartners; i++)
+        {
+            css << "   uint " << partnerVar("indexPartner", i) << " = (" << var("index") << " + " << i << "u * "
+                << var("stride") << ") % (" << groupSize << "u * " << var("stride") << ");\n";
+        }
+        // An invocation is idle if it is left over after the last full group
+        css << "   bool " << var("idle") << " = " << var("index") << " >= " << groupSize << "u * " << var("stride")
+            << ";\n";
+    }
+    else
+    {
+        // Mirror partner's index, assumes only one partner
+        css << "   uint " << partnerVar("indexPartner", 1) << " = " << var("size") << " - 1u - " << var("index")
+            << ";\n"
+            // No invocation is left outside of a group, with odd block size the middle invocation maps to itself
+            << "   bool " << var("idle") << " = false;\n";
+    }
+
+    // At subgroup scope, an invocation is also idle if any of its partners is inactive
     if (scope == SCOPE_SUBGROUP)
     {
-        css << "   uvec4 sgBallot = subgroupBallot(true);\n";
-        for (uint32_t i = 1; i <= partners; i++)
+        css << "   uvec4 " << var("ballot") << " = subgroupBallot(true);\n";
+        for (uint32_t i = 1; i <= numPartners; i++)
         {
-            css << "   idle = idle || !subgroupBallotBitExtract(sgBallot, indexPartner" << i << ");\n";
+            css << "   " << var("idle") << " = " << var("idle") << " || !subgroupBallotBitExtract(" << var("ballot")
+                << ", " << partnerVar("indexPartner", i) << ");\n";
         }
+    }
 
-        css << "   if (idle) {\n";
-        for (uint32_t i = 1; i <= partners; i++)
-        {
-            css << "      indexPartner" << i << " = index;\n";
-        }
+    // Returning from idle invocations can lead to barrier divergence, so we map idle invocations to themselves
+    if (isIndexRotation || scope == SCOPE_SUBGROUP)
+    {
+        css << "   if (" << var("idle") << ") {\n";
+        for (uint32_t i = 1; i <= numPartners; i++)
+            css << "      " << partnerVar("indexPartner", i) << " = " << var("index") << ";\n";
         css << "   }\n";
     }
 
-    // Compute 2D positions for each partner
-    for (uint32_t i = 1; i <= partners; i++)
+    // Position, invocationId, and buffer coordinates for each partner
+    for (uint32_t i = 1; i <= numPartners; i++)
     {
-        const std::string indexPartner = "indexPartner" + std::to_string(i);
-        css << "   ivec2 posPartner" << i << " = " << coordPosFromIndex(scope, indexPartner) << ";\n";
-    }
-
-    // Compute invocationId and coordinates for each partner
-    for (uint32_t i = 1; i <= partners; i++)
-    {
-        const std::string pos    = "posPartner" + std::to_string(i);
-        const std::string suffix = "CoordPartner" + std::to_string(i);
-        css << "   uint invocationIdPartner" << i << " = getInvocationId(" << pos << ");\n";
-        css << initBufferCoordinates(suffix.c_str(), pos.c_str());
+        const std::string posPartner = partnerVar("posPartner", i);
+        css << "   ivec2 " << posPartner << " = " << blockPos(partnerVar("indexPartner", i)) << ";\n"
+            << "   uint " << partnerVar("invocationIdPartner", i) << " = getInvocationId(" << posPartner << ");\n"
+            << initBufferCoordinates(partnerVar("CoordPartner", i).c_str(), posPartner.c_str());
     }
 
     return css.str();
@@ -724,9 +596,12 @@ void MemoryModelTestCase::checkSupportStageAtomics(const Context &context) const
         TCU_THROW(NotSupportedError, "fragmentStoresAndAtomics not supported");
 }
 
-void MemoryModelTestCase::checkSupportSubgroupFeatures(const Context &context) const
+void MemoryModelTestCase::checkSupportSubgroupFeatures(const Context &context, const uint32_t minSize) const
 {
     const VkPhysicalDeviceSubgroupProperties &subgroupProperties = context.getSubgroupProperties();
+
+    if (subgroupProperties.subgroupSize < minSize)
+        TCU_THROW(NotSupportedError, "Device does not support required subgroup size");
 
     const VkSubgroupFeatureFlags requiredOperations =
         VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
@@ -734,15 +609,7 @@ void MemoryModelTestCase::checkSupportSubgroupFeatures(const Context &context) c
     if ((subgroupProperties.supportedOperations & requiredOperations) != requiredOperations)
         TCU_THROW(NotSupportedError, "Subgroup features not supported");
 
-    VkShaderStageFlags flags = 0;
-    if (m_params.stage == STAGE_COMPUTE)
-        flags = VK_SHADER_STAGE_COMPUTE_BIT;
-    else if (m_params.stage == STAGE_VERTEX)
-        flags = VK_SHADER_STAGE_VERTEX_BIT;
-    else if (m_params.stage == STAGE_FRAGMENT)
-        flags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    if ((subgroupProperties.supportedStages & flags) == 0)
+    if ((subgroupProperties.supportedStages & getShaderStageFlag(m_params.stage)) == 0)
         TCU_THROW(NotSupportedError, "Device does not support subgroup operations for this stage");
 }
 
@@ -1024,106 +891,101 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     const VkDevice device     = m_context.getDevice();
     Allocator &allocator      = m_context.getDefaultAllocator();
 
-    const VkShaderStageFlags allShaderStages =
-        VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    const VkPipelineStageFlags allPipelineStages =
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
-        (m_stage == STAGE_COMPUTE ? 0 : (VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT));
+    const VkShaderStageFlags shaderStageFlags     = getShaderStageFlag(m_stage);
+    const VkPipelineStageFlags pipelineStageFlags = getPipelineStageFlag(m_stage);
 
-    uint32_t DIM                         = 31;
+    // Workgroup dimension, shrink workgroup size to fit HW limits if necessary
+    uint32_t dim = 31;
+
     const VkPhysicalDeviceLimits &limits = m_context.getDeviceProperties().limits;
-    // If necessary, shrink workgroup size to fit HW limits
-    if (DIM * DIM > limits.maxComputeWorkGroupInvocations)
-    {
-        DIM = (uint32_t)deFloatSqrt((float)limits.maxComputeWorkGroupInvocations);
-    }
+    if (dim * dim > limits.maxComputeWorkGroupInvocations)
+        dim = (uint32_t)deFloatSqrt((float)limits.maxComputeWorkGroupInvocations);
+
+    const uint32_t DIM                    = dim;
     const uint32_t NUM_WORKGROUP_EACH_DIM = 8;
     const uint32_t GRID_DIM               = DIM * NUM_WORKGROUP_EACH_DIM;
     const uint32_t NUM_INVOCATIONS        = GRID_DIM * GRID_DIM;
 
-    // Last buffer is the result buffer
+    // Create buffers and images, the last buffer is always the result buffer
     const uint32_t numBuffers      = static_cast<uint32_t>(m_buffers.size());
     const uint32_t idxResultBuffer = numBuffers - 1;
     DE_ASSERT(!m_buffers.empty() && m_buffers[idxResultBuffer].sc == SC_BUFFER &&
               m_buffers[idxResultBuffer].type == DATA_TYPE_UINT);
 
-    std::vector<VkDeviceSize> bufferSizes(numBuffers);
     std::vector<de::MovePtr<BufferWithMemory>> buffers(numBuffers);
-    std::vector<VkDeviceAddress> bufferAddresses(numBuffers);
-    de::MovePtr<BufferWithMemory> copyBuffer;
-
-    const bool isDeviceAddressSupported = m_context.isDeviceFunctionalitySupported("VK_KHR_buffer_device_address");
-    for (uint32_t i = 0; i < numBuffers; ++i)
-    {
-        const BufferDef &buffer  = m_buffers[i];
-        const size_t elementSize = is64BitType(buffer.type) ? sizeof(uint64_t) : sizeof(uint32_t);
-        bufferSizes[i]           = NUM_INVOCATIONS * elementSize;
-        if (buffer.sc != SC_BUFFER && buffer.sc != SC_PHYSBUFFER)
-            continue;
-
-        VkBufferUsageFlags usageFlags =
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        if (buffer.sc == SC_PHYSBUFFER)
-            usageFlags |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-
-        const MemoryRequirement memReq = getBufferMemoryRequirement(buffer, isDeviceAddressSupported);
-        buffers[i]                     = de::MovePtr<BufferWithMemory>(
-            new BufferWithMemory(vk, device, allocator, makeBufferCreateInfo(bufferSizes[i], usageFlags), memReq));
-        if (buffer.sc == SC_PHYSBUFFER)
-            bufferAddresses[i] = getBufferDeviceAddress(vk, device, **buffers[i]);
-    }
-
-    // Try to use cached host memory for the buffer the CPU will read from, else fallback to host visible.
-    try
-    {
-        copyBuffer = de::MovePtr<BufferWithMemory>(new BufferWithMemory(
-            vk, device, allocator, makeBufferCreateInfo(bufferSizes[idxResultBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT),
-            MemoryRequirement::HostVisible | MemoryRequirement::Cached));
-    }
-    catch (const tcu::NotSupportedError &)
-    {
-        copyBuffer = de::MovePtr<BufferWithMemory>(new BufferWithMemory(
-            vk, device, allocator, makeBufferCreateInfo(bufferSizes[idxResultBuffer], VK_BUFFER_USAGE_TRANSFER_DST_BIT),
-            MemoryRequirement::HostVisible));
-    }
-
-    const VkImageSubresourceRange range = makeImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u);
     std::vector<de::MovePtr<ImageWithMemory>> images(numBuffers);
     std::vector<Move<VkImageView>> imageViews(numBuffers);
 
+    const bool isDeviceAddressSupported = m_context.isDeviceFunctionalitySupported("VK_KHR_buffer_device_address");
+    const VkImageSubresourceRange range = makeImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u);
+
     for (uint32_t i = 0; i < numBuffers; ++i)
     {
-        if (m_buffers[i].sc != SC_IMAGE)
-            continue;
+        const BufferDef &buffer = m_buffers[i];
 
-        const VkFormat imageFormat = isIntType(m_buffers[i].type) ? VK_FORMAT_R32_UINT : VK_FORMAT_R32_SFLOAT;
-        const VkImageUsageFlags usageFlags =
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        const MemoryRequirement memReq = m_buffers[i].local ? MemoryRequirement::Local : MemoryRequirement::NonLocal;
-
-        try
+        switch (buffer.sc)
         {
-            images[i] = de::MovePtr<ImageWithMemory>(new ImageWithMemory(
-                vk, device, allocator, makeImageCreateInfo(imageFormat, GRID_DIM, GRID_DIM, usageFlags), memReq));
+        case SC_BUFFER:
+        case SC_PHYSBUFFER:
+        {
+            const size_t elementSize       = is64BitType(buffer.type) ? sizeof(uint64_t) : sizeof(uint32_t);
+            const size_t bufferSize        = NUM_INVOCATIONS * elementSize;
+            const MemoryRequirement memReq = getBufferMemoryRequirement(buffer, isDeviceAddressSupported);
+            const VkBufferUsageFlags usageFlags =
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                (buffer.sc == SC_PHYSBUFFER ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0);
+
+            buffers[i] = de::MovePtr<BufferWithMemory>(
+                new BufferWithMemory(vk, device, allocator, makeBufferCreateInfo(bufferSize, usageFlags), memReq));
+            break;
         }
-        catch (const tcu::NotSupportedError &)
+        case SC_IMAGE:
         {
-            if (!m_buffers[i].local)
+            const VkFormat imageFormat     = isIntType(buffer.type) ? VK_FORMAT_R32_UINT : VK_FORMAT_R32_SFLOAT;
+            const MemoryRequirement memReq = buffer.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal;
+
+            VkImageCreateInfo imageCreateInfo = initVulkanStructure();
+            imageCreateInfo.imageType         = VK_IMAGE_TYPE_2D;
+            imageCreateInfo.format            = imageFormat;
+            imageCreateInfo.extent            = makeExtent3D(GRID_DIM, GRID_DIM, 1u);
+            imageCreateInfo.mipLevels         = 1u;
+            imageCreateInfo.arrayLayers       = 1u;
+            imageCreateInfo.samples           = VK_SAMPLE_COUNT_1_BIT;
+            imageCreateInfo.usage =
+                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+            try
             {
+                images[i] =
+                    de::MovePtr<ImageWithMemory>(new ImageWithMemory(vk, device, allocator, imageCreateInfo, memReq));
+            }
+            catch (const tcu::NotSupportedError &)
+            {
+                if (buffer.local)
+                    throw;
                 TCU_THROW(NotSupportedError, "Test variant uses non-device-local memory, which is not supported");
             }
-            throw;
-        }
 
-        imageViews[i] = makeImageView(vk, device, **images[i], VK_IMAGE_VIEW_TYPE_2D, imageFormat, range);
+            imageViews[i] = makeImageView(vk, device, **images[i], VK_IMAGE_VIEW_TYPE_2D, imageFormat, range);
+            break;
+        }
+        case SC_WORKGROUP:
+            // Workgroup memory is declared in the shader and needs no resource
+            break;
+        default:
+            DE_ASSERT(0);
+        }
     }
 
+    // Initialize layout and descriptor set
     DescriptorSetLayoutBuilder layoutBuilder;
     for (uint32_t i = 0; i < numBuffers; ++i)
     {
-        const VkDescriptorType descType =
-            (m_buffers[i].sc == SC_IMAGE) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        layoutBuilder.addSingleBinding(descType, allShaderStages);
+        if (m_buffers[i].sc == SC_BUFFER)
+            layoutBuilder.addSingleIndexedBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, shaderStageFlags, i);
+        else if (m_buffers[i].sc == SC_IMAGE)
+            layoutBuilder.addSingleIndexedBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, shaderStageFlags, i);
     }
 
     const Unique<VkDescriptorSetLayout> descriptorSetLayout(layoutBuilder.build(vk, device));
@@ -1141,7 +1003,7 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     {
         if (m_buffers[i].sc == SC_BUFFER)
         {
-            const VkDescriptorBufferInfo bufferInfo = makeDescriptorBufferInfo(**buffers[i], 0, bufferSizes[i]);
+            const VkDescriptorBufferInfo bufferInfo = makeDescriptorBufferInfo(**buffers[i], 0, VK_WHOLE_SIZE);
             setUpdateBuilder.writeSingle(*descriptorSet, DescriptorSetUpdateBuilder::Location::binding(i),
                                          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &bufferInfo);
         }
@@ -1155,29 +1017,28 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     }
     setUpdateBuilder.update(vk, device);
 
-    const VkPushConstantRange pushConstRange = {
-        allShaderStages,                       // VkShaderStageFlags stageFlags
-        0,                                     // uint32_t offset
-        idxResultBuffer * DEVICE_ADDRESS_SIZE, // uint32_t size
-    };
-
+    // Physical storage buffer addresses are push constants, at an offset given by the buffer index.
+    // The result buffer is never a physical storage buffer, so the range ends before it.
+    const VkPushConstantRange pushConstRange = {shaderStageFlags, 0, idxResultBuffer * DEVICE_ADDRESS_SIZE};
+    const bool hasPhysBuffers =
+        std::any_of(m_buffers.begin(), m_buffers.end(), [](const BufferDef &b) { return b.sc == SC_PHYSBUFFER; });
     const Unique<VkPipelineLayout> pipelineLayout(
-        makePipelineLayout(vk, device, *descriptorSetLayout, idxResultBuffer > 0 ? &pushConstRange : nullptr));
-
-    Move<VkPipeline> pipeline;
-    Move<VkRenderPass> renderPass;
-    Move<VkFramebuffer> framebuffer;
+        makePipelineLayout(vk, device, *descriptorSetLayout, hasPhysBuffers ? &pushConstRange : nullptr));
 
     const VkPipelineBindPoint bindPoint =
         m_stage == STAGE_COMPUTE ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
 
-    const uint32_t specData[2]                = {DIM, NUM_WORKGROUP_EACH_DIM};
     const VkSpecializationMapEntry entries[2] = {
         makeSpecializationMapEntry(0u, 0u, sizeof(uint32_t)),
         makeSpecializationMapEntry(1u, sizeof(uint32_t), sizeof(uint32_t)),
     };
-
+    const uint32_t specData[2]          = {DIM, NUM_WORKGROUP_EACH_DIM};
     const VkSpecializationInfo specInfo = makeSpecializationInfo(2u, entries, sizeof(specData), specData);
+
+    // Initialize pipeline and command buffer
+    Move<VkPipeline> pipeline;
+    Move<VkRenderPass> renderPass;
+    Move<VkFramebuffer> framebuffer;
 
     if (m_stage == STAGE_COMPUTE)
     {
@@ -1187,52 +1048,83 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     }
     else
     {
-        // Vertex tests run "test" as the only shader stage, fragment tests pair it with the fullscreen "vert" shader
+        // Vertex tests run "test" as the only shader stage, fragment tests pair it with the fullscreen "vert" shader.
+        // Without a fragment stage, makeGraphicsPipeline disables rasterization.
         const bool isVertexStage = (m_stage == STAGE_VERTEX);
         const Unique<VkShaderModule> vertexShader(
             createShaderModule(vk, device, m_context.getBinaryCollection().get(isVertexStage ? "test" : "vert"), 0));
-        const Unique<VkShaderModule> fragmentShader(
-            isVertexStage ? Move<VkShaderModule>() :
-                            createShaderModule(vk, device, m_context.getBinaryCollection().get("test"), 0));
+        Move<VkShaderModule> fragmentShader;
+        std::vector<VkPipelineShaderStageCreateInfo> shaderStages{
+            makePipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, *vertexShader, &specInfo)};
+        if (!isVertexStage)
+        {
+            fragmentShader = createShaderModule(vk, device, m_context.getBinaryCollection().get("test"), 0);
+            shaderStages.push_back(
+                makePipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, *fragmentShader, &specInfo));
+        }
 
-        const VkViewport viewport = makeViewport(GRID_DIM, GRID_DIM);
-        const VkRect2D scissor    = makeRect2D(GRID_DIM, GRID_DIM);
-        const VkPrimitiveTopology topology =
+        const VkPipelineVertexInputStateCreateInfo vertexInputState = initVulkanStructure();
+        VkPipelineInputAssemblyStateCreateInfo inputAssemblyState   = initVulkanStructure();
+        inputAssemblyState.topology =
             isVertexStage ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-        const VkBool32 rasterizerDiscardEnable = isVertexStage ? VK_TRUE : VK_FALSE;
+
+        const std::vector<VkViewport> viewports{makeViewport(GRID_DIM, GRID_DIM)};
+        const std::vector<VkRect2D> scissors{makeRect2D(GRID_DIM, GRID_DIM)};
 
         renderPass  = makeRenderPass(vk, device);
         framebuffer = makeFramebuffer(vk, device, *renderPass, 0, nullptr, GRID_DIM, GRID_DIM);
-        pipeline    = makeGraphicsPipeline(vk, device, *pipelineLayout, *vertexShader, *fragmentShader, *renderPass,
-                                           &viewport, &scissor, topology, rasterizerDiscardEnable, &specInfo);
+        pipeline    = makeGraphicsPipeline(vk, device, VK_NULL_HANDLE, *pipelineLayout, 0u, shaderStages, *renderPass,
+                                           viewports, scissors, 0u, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                           &vertexInputState, &inputAssemblyState);
     }
 
     const Unique<VkCommandPool> cmdPool(makeCommandPool(vk, device, queueData.familyIndex));
     const Unique<VkCommandBuffer> cmdBuffer(
         allocateCommandBuffer(vk, device, *cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY));
+
+    // Initialize the buffer the CPU will read from.
+    // Try to use cached host memory, fallback to host visible memory.
+    de::MovePtr<BufferWithMemory> copyBuffer;
+    const size_t sizeCopyBuffer = sizeof(uint32_t) * NUM_INVOCATIONS;
+    try
+    {
+        copyBuffer = de::MovePtr<BufferWithMemory>(new BufferWithMemory(
+            vk, device, allocator, makeBufferCreateInfo(sizeCopyBuffer, VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+            MemoryRequirement::HostVisible | MemoryRequirement::Cached));
+    }
+    catch (const tcu::NotSupportedError &)
+    {
+        copyBuffer = de::MovePtr<BufferWithMemory>(new BufferWithMemory(
+            vk, device, allocator, makeBufferCreateInfo(sizeCopyBuffer, VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+            MemoryRequirement::HostVisible));
+    }
+
+    const VkBufferCopy copyParams = makeBufferCopy(0u, 0u, sizeCopyBuffer);
     const VkClearValue clearColor = makeClearValueColorU32(0, 0, 0, 0);
-    const VkBufferCopy copyParams = makeBufferCopy(0u, 0u, bufferSizes[idxResultBuffer]);
 
     constexpr uint32_t NUM_SUBMITS    = 4;
     constexpr uint32_t NUM_ITERATIONS = 50;
 
-    for (uint32_t x = 0; x < NUM_SUBMITS; ++x)
+    for (uint32_t submit = 0; submit < NUM_SUBMITS; submit++)
     {
         beginCommandBuffer(vk, *cmdBuffer, 0u);
 
-        if (x == 0)
-            vk.cmdFillBuffer(*cmdBuffer, **buffers[idxResultBuffer], 0, bufferSizes[idxResultBuffer], 0);
-
-        for (uint32_t i = 0; i < numBuffers; ++i)
+        if (submit == 0)
         {
-            if (m_buffers[i].sc != SC_IMAGE)
-                continue;
+            // The result buffer is cleared once and collects the failures of all submits and iterations
+            vk.cmdFillBuffer(*cmdBuffer, **buffers[idxResultBuffer], 0, VK_WHOLE_SIZE, 0);
 
-            const VkImageMemoryBarrier imageBarrier =
-                makeImageMemoryBarrier(0u, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                                       VK_IMAGE_LAYOUT_GENERAL, **images[i], range);
-            cmdPipelineImageMemoryBarrier(vk, *cmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                                          VK_PIPELINE_STAGE_TRANSFER_BIT, &imageBarrier);
+            for (uint32_t i = 0; i < numBuffers; ++i)
+            {
+                if (m_buffers[i].sc != SC_IMAGE)
+                    continue;
+
+                const VkImageMemoryBarrier imageBarrier =
+                    makeImageMemoryBarrier(0u, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                                           VK_IMAGE_LAYOUT_GENERAL, **images[i], range);
+                cmdPipelineImageMemoryBarrier(vk, *cmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                              VK_PIPELINE_STAGE_TRANSFER_BIT, &imageBarrier);
+            }
         }
 
         vk.cmdBindDescriptorSets(*cmdBuffer, bindPoint, *pipelineLayout, 0u, 1, &*descriptorSet, 0u, nullptr);
@@ -1243,16 +1135,17 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
             if (m_buffers[i].sc != SC_PHYSBUFFER)
                 continue;
 
-            vk.cmdPushConstants(*cmdBuffer, *pipelineLayout, allShaderStages, DEVICE_ADDRESS_SIZE * i,
-                                DEVICE_ADDRESS_SIZE, &bufferAddresses[i]);
+            const VkDeviceAddress address = getBufferDeviceAddress(vk, device, **buffers[i]);
+            vk.cmdPushConstants(*cmdBuffer, *pipelineLayout, shaderStageFlags, DEVICE_ADDRESS_SIZE * i,
+                                DEVICE_ADDRESS_SIZE, &address);
         }
 
-        for (uint32_t iters = 0; iters < NUM_ITERATIONS; ++iters)
+        for (uint32_t iteration = 0; iteration < NUM_ITERATIONS; iteration++)
         {
             for (uint32_t i = 0; i < idxResultBuffer; ++i)
             {
                 if (buffers[i])
-                    vk.cmdFillBuffer(*cmdBuffer, **buffers[i], 0, bufferSizes[i], 0);
+                    vk.cmdFillBuffer(*cmdBuffer, **buffers[i], 0, VK_WHOLE_SIZE, 0);
                 if (images[i])
                     vk.cmdClearColorImage(*cmdBuffer, **images[i], VK_IMAGE_LAYOUT_GENERAL, &clearColor.color, 1,
                                           &range);
@@ -1260,7 +1153,7 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
 
             const VkMemoryBarrier transferToShader =
                 makeMemoryBarrier(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-            cmdPipelineMemoryBarrier(vk, *cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, allPipelineStages,
+            cmdPipelineMemoryBarrier(vk, *cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, pipelineStageFlags,
                                      &transferToShader);
 
             if (m_stage == STAGE_COMPUTE)
@@ -1269,28 +1162,21 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
             }
             else
             {
+                // Draw a point cloud for vertex shader testing, and a single quad for fragment shader testing
                 beginRenderPass(vk, *cmdBuffer, *renderPass, *framebuffer, makeRect2D(GRID_DIM, GRID_DIM), 0, nullptr,
                                 VK_SUBPASS_CONTENTS_INLINE);
-                // Draw a point cloud for vertex shader testing, and a single quad for fragment shader testing
-                if (m_stage == STAGE_VERTEX)
-                {
-                    vk.cmdDraw(*cmdBuffer, NUM_INVOCATIONS, 1u, 0u, 0u);
-                }
-                else
-                {
-                    vk.cmdDraw(*cmdBuffer, 4u, 1u, 0u, 0u);
-                }
+                vk.cmdDraw(*cmdBuffer, m_stage == STAGE_VERTEX ? NUM_INVOCATIONS : 4u, 1u, 0u, 0u);
                 endRenderPass(vk, *cmdBuffer);
             }
 
             const VkMemoryBarrier shaderToTransfer =
                 makeMemoryBarrier(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                                   VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
-            cmdPipelineMemoryBarrier(vk, *cmdBuffer, allPipelineStages, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            cmdPipelineMemoryBarrier(vk, *cmdBuffer, pipelineStageFlags, VK_PIPELINE_STAGE_TRANSFER_BIT,
                                      &shaderToTransfer);
         }
 
-        if (x == NUM_SUBMITS - 1)
+        if (submit == NUM_SUBMITS - 1)
         {
             vk.cmdCopyBuffer(*cmdBuffer, **buffers[idxResultBuffer], **copyBuffer, 1, &copyParams);
             const VkMemoryBarrier transferToHost =
@@ -1304,33 +1190,26 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
         m_context.resetCommandPoolForVKSC(device, *cmdPool);
     }
 
-    tcu::TestLog &log = m_context.getTestContext().getLog();
-
     invalidateAlloc(vk, device, copyBuffer->getAllocation());
-    const uint32_t *ptr = static_cast<const uint32_t *>(copyBuffer->getAllocation().getHostPtr());
-    qpTestResult res    = QP_TEST_RESULT_PASS;
 
-    constexpr uint32_t MAX_LOGGED_ERRORS = 256;
-    uint32_t numErrors                   = 0;
+    tcu::TestLog &log                = m_context.getTestContext().getLog();
+    const uint32_t *ptr              = static_cast<const uint32_t *>(copyBuffer->getAllocation().getHostPtr());
+    const uint32_t MAX_LOGGED_ERRORS = 256;
+
+    uint32_t numErrors = 0;
     for (uint32_t i = 0; i < NUM_INVOCATIONS; ++i)
     {
-        if (ptr[i] != 0)
-        {
-            if (numErrors < MAX_LOGGED_ERRORS)
-            {
-                log << tcu::TestLog::Message << "Failed invocation: " << i << tcu::TestLog::EndMessage;
-            }
-            numErrors++;
-            res = QP_TEST_RESULT_FAIL;
-        }
+        if (ptr[i] == 0)
+            continue;
+        if (numErrors++ < MAX_LOGGED_ERRORS)
+            log << tcu::TestLog::Message << "Failed invocation: " << i << tcu::TestLog::EndMessage;
     }
 
-    if (numErrors)
-    {
-        log << tcu::TestLog::Message << "Total Errors: " << numErrors << tcu::TestLog::EndMessage;
-    }
+    if (numErrors == 0)
+        return tcu::TestStatus::pass("Pass");
 
-    return tcu::TestStatus(res, qpGetTestResultName(res));
+    log << tcu::TestLog::Message << "Total Errors: " << numErrors << tcu::TestLog::EndMessage;
+    return tcu::TestStatus::fail("Fail");
 }
 
 } // namespace
