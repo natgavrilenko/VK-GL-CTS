@@ -54,13 +54,13 @@ struct CaseDef
     Scope scope;
 };
 
-std::vector<BufferDef> createBuffers(const CaseDef &data)
+std::vector<VarDef> createVars(const CaseDef &data)
 {
     const MemQualifier qualifier = scopeToQualifier(data.scope);
-    return std::vector<BufferDef>{{"payload", qualifier, data.payloadSC, data.payloadType, data.payloadMemLocal},
-                                  {"guard1", qualifier, data.guard1SC, data.guard1Type, data.guard1MemLocal},
-                                  {"guard2", qualifier, data.guard2SC, data.guard2Type, data.guard2MemLocal},
-                                  {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
+    return std::vector<VarDef>{{"payload", qualifier, data.payloadSC, data.payloadType, data.payloadMemLocal},
+                               {"guard1", qualifier, data.guard1SC, data.guard1Type, data.guard1MemLocal},
+                               {"guard2", qualifier, data.guard2SC, data.guard2Type, data.guard2MemLocal},
+                               {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
 class TransitiveSemanticsTestCase : public MemoryModelTestCase
@@ -76,7 +76,7 @@ private:
 
 TransitiveSemanticsTestCase::TransitiveSemanticsTestCase(tcu::TestContext &context, const char *name,
                                                          const CaseDef &data)
-    : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createVars(data))
     , m_data(data)
 {
 }
@@ -92,20 +92,20 @@ void TransitiveSemanticsTestCase::checkSupport(Context &context) const
     if (m_data.scope == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context, 3);
 
-    checkSupportBuffers(context);
-    checkSupportBufferAtomics(context, "guard1");
-    checkSupportBufferAtomics(context, "guard2");
+    checkSupportVars(context);
+    checkSupportVarAtomics(context, "guard1");
+    checkSupportVarAtomics(context, "guard2");
 }
 
 std::string TransitiveSemanticsTestCase::initProgram() const
 {
     const Scope scope   = m_data.scope;
-    const DataType type = getBuffer("payload").type;
+    const DataType type = getVar("payload").type;
     const char *typeStr = gl_type(type);
 
-    const uint32_t semPayload = getBufferSemantics("payload");
-    const uint32_t semGuard1  = getBufferSemantics("guard1");
-    const uint32_t semGuard2  = getBufferSemantics("guard2");
+    const uint32_t semPayload = getVarSemantics("payload");
+    const uint32_t semGuard1  = getVarSemantics("guard1");
+    const uint32_t semGuard2  = getVarSemantics("guard2");
     const uint32_t semRel1    = SEM_RELEASE | semPayload | semGuard1;
     const uint32_t semAcq1    = SEM_ACQUIRE | semPayload | semGuard1;
     const uint32_t semRel2    = SEM_RELEASE | semPayload | semGuard2;

@@ -72,12 +72,12 @@ int scopeWidth(Scope scope)
     }
 }
 
-std::vector<BufferDef> createBuffers(const CaseDef &data)
+std::vector<VarDef> createVars(const CaseDef &data)
 {
-    return std::vector<BufferDef>{{"payload", MEM_NONE, data.payloadSC, data.dataType, data.payloadMemLocal},
-                                  {"guard1", MEM_NONE, data.guard1SC, data.dataType, data.guard1MemLocal},
-                                  {"guard2", MEM_NONE, data.guard2SC, data.dataType, data.guard2MemLocal},
-                                  {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
+    return std::vector<VarDef>{{"payload", MEM_NONE, data.payloadSC, data.dataType, data.payloadMemLocal},
+                               {"guard1", MEM_NONE, data.guard1SC, data.dataType, data.guard1MemLocal},
+                               {"guard2", MEM_NONE, data.guard2SC, data.dataType, data.guard2MemLocal},
+                               {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
 class RepeatedAccessTestCase : public MemoryModelTestCase
@@ -92,7 +92,7 @@ protected:
 };
 
 RepeatedAccessTestCase::RepeatedAccessTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {data.stage, false}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {data.stage, false}, createVars(data))
     , m_data(data)
 {
 }
@@ -113,9 +113,9 @@ void RepeatedAccessTestCase::checkSupport(Context &context) const
     if (m_data.scopeNear == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context);
 
-    checkSupportBuffers(context);
-    checkSupportBufferAtomics(context, "guard1");
-    checkSupportBufferAtomics(context, "guard2");
+    checkSupportVars(context);
+    checkSupportVarAtomics(context, "guard1");
+    checkSupportVarAtomics(context, "guard2");
     checkSupportStageAtomics(context);
 }
 
@@ -123,7 +123,7 @@ std::string RepeatedAccessTestCase::declareSpvIntrinsics() const
 {
     std::ostringstream css;
     css << "#extension GL_EXT_spirv_intrinsics : enable\n"
-        << declareBufferSpvIntrinsics("payload", m_data.scopeFar == SCOPE_DEVICE);
+        << declareVarSpvIntrinsics("payload", m_data.scopeFar == SCOPE_DEVICE);
     return css.str();
 }
 
@@ -139,10 +139,10 @@ private:
 
 std::string ShadowedStoreIncTestCase::initProgram() const
 {
-    const char *typeStr       = gl_type(getBuffer("payload").type);
+    const char *typeStr       = gl_type(getVar("payload").type);
     const Scope scopeNear     = m_data.scopeNear;
     const Scope scopeFar      = m_data.scopeFar;
-    const uint32_t semPayload = getBufferSemantics("payload");
+    const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semRel     = SEM_RELEASE | semPayload;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload;
 
@@ -186,10 +186,10 @@ private:
 
 std::string ShadowedStoreDecTestCase::initProgram() const
 {
-    const char *typeStr       = gl_type(getBuffer("payload").type);
+    const char *typeStr       = gl_type(getVar("payload").type);
     const Scope scopeNear     = m_data.scopeNear;
     const Scope scopeFar      = m_data.scopeFar;
-    const uint32_t semPayload = getBufferSemantics("payload");
+    const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semRel     = SEM_RELEASE | semPayload;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload;
 
@@ -233,10 +233,10 @@ private:
 
 std::string ObservedLoadTestCase::initProgram() const
 {
-    const char *typeStr       = gl_type(getBuffer("payload").type);
+    const char *typeStr       = gl_type(getVar("payload").type);
     const Scope scopeNear     = m_data.scopeNear;
     const Scope scopeFar      = m_data.scopeFar;
-    const uint32_t semPayload = getBufferSemantics("payload");
+    const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semRel     = SEM_RELEASE | semPayload;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload;
 
@@ -274,7 +274,8 @@ template <typename PatternTestCase>
 void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
 {
     static const NamedValue<StorageClass> scCases[] = {
-        {SC_BUFFER, "buffer"}, {SC_WORKGROUP, "workgroup"},
+        {SC_BUFFER, "buffer"},
+        {SC_WORKGROUP, "workgroup"},
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
@@ -332,7 +333,7 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
         // The payload is shared at both scopes, each guard at the scope of its step.
         const Scope guard1Scope = PatternTestCase::nearFirst ? c.scopeNear : c.scopeFar;
         const Scope guard2Scope = PatternTestCase::nearFirst ? c.scopeFar : c.scopeNear;
-        const int wgScopeWidth = scopeWidth(SCOPE_WORKGROUP);
+        const int wgScopeWidth  = scopeWidth(SCOPE_WORKGROUP);
         if ((c.payloadSC == SC_WORKGROUP && scopeWidth(c.scopeFar) > wgScopeWidth) ||
             (c.guard1SC == SC_WORKGROUP && scopeWidth(guard1Scope) > wgScopeWidth) ||
             (c.guard2SC == SC_WORKGROUP && scopeWidth(guard2Scope) > wgScopeWidth))

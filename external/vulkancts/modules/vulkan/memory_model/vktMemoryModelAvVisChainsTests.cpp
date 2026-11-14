@@ -60,11 +60,11 @@ struct CaseDef
     bool transitiveVis;
 };
 
-std::vector<BufferDef> createBuffers(const CaseDef &data)
+std::vector<VarDef> createVars(const CaseDef &data)
 {
     const MemQualifier payloadQualifier = data.coherent ? MEM_WORKGROUP : MEM_NONPRIVATE;
     const MemQualifier guardQualifier   = data.guardSC == SC_IMAGE ? payloadQualifier : MEM_NONE;
-    return std::vector<BufferDef>{
+    return std::vector<VarDef>{
         {"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal},
         {"guard", guardQualifier, data.guardSC, data.dataType, data.guardMemLocal},
         {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true},
@@ -78,13 +78,13 @@ public:
     void checkSupport(Context &context) const override;
 
 private:
-    std::string declareSharedVariables() const override;
+    std::string declareSharedVars() const override;
     std::string initProgram() const override;
     const CaseDef m_data;
 };
 
 AvVisChainsTestCase::AvVisChainsTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createVars(data))
     , m_data(data)
 {
 }
@@ -103,11 +103,11 @@ void AvVisChainsTestCase::checkSupport(Context &context) const
     if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModelAvailabilityVisibilityChains)
         TCU_THROW(NotSupportedError, "vulkanMemoryModelAvailabilityVisibilityChains not supported");
 
-    checkSupportBuffers(context);
-    checkSupportBufferAtomics(context, "guard");
+    checkSupportVars(context);
+    checkSupportVarAtomics(context, "guard");
 }
 
-std::string AvVisChainsTestCase::declareSharedVariables() const
+std::string AvVisChainsTestCase::declareSharedVars() const
 {
     if (m_data.transitiveVis)
         return std::string{"shared bool sharedSkip;\n"};
@@ -116,13 +116,13 @@ std::string AvVisChainsTestCase::declareSharedVariables() const
 
 std::string AvVisChainsTestCase::initProgram() const
 {
-    const DataType type = getBuffer("payload").type;
+    const DataType type = getVar("payload").type;
     const char *typeStr = gl_type(type);
 
     const uint32_t semAv      = m_data.coherent ? 0u : uint32_t(SEM_AVAILABLE);
     const uint32_t semVis     = m_data.coherent ? 0u : uint32_t(SEM_VISIBLE);
-    const uint32_t semPayload = getBufferSemantics("payload");
-    const uint32_t semGuard   = getBufferSemantics("guard");
+    const uint32_t semPayload = getVarSemantics("payload");
+    const uint32_t semGuard   = getVarSemantics("guard");
     const uint32_t semRel     = SEM_RELEASE | semPayload | SEM_AVAILABLE;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload | SEM_VISIBLE;
     const uint32_t semAcqRel  = SEM_ACQUIRE_RELEASE | semPayload;
@@ -131,7 +131,7 @@ std::string AvVisChainsTestCase::initProgram() const
 
     css << initPartnerCoordinates(SCOPE_DEVICE)
         << "   ivec2 groupPosPartner = posPartner - posPartner % DIM;\n"
-        << initBufferCoordinates("GroupCoordPartner", "groupPosPartner");
+        << initVarCoordinates("GroupCoordPartner", "groupPosPartner");
 
     css << "   bool skip = false;\n"
         << "   uint value = invocationId;\n"

@@ -63,8 +63,8 @@ MemQualifier getMemQualifier(const CaseDef &data)
 
 Scope getMappingScope(const CaseDef &data)
 {
-    const bool hasSharedBuffer = data.payloadSC == SC_WORKGROUP;
-    if ((data.syncScope == SCOPE_DEVICE || data.syncScope == SCOPE_QUEUEFAMILY) && hasSharedBuffer)
+    const bool hasSharedVar = data.payloadSC == SC_WORKGROUP;
+    if ((data.syncScope == SCOPE_DEVICE || data.syncScope == SCOPE_QUEUEFAMILY) && hasSharedVar)
     {
         return SCOPE_WORKGROUP;
     }
@@ -78,11 +78,11 @@ bool usesLoadIntrinsic(const CaseDef &data)
     return !data.core11 && data.payloadSC == SC_WORKGROUP;
 }
 
-std::vector<BufferDef> createBuffers(const CaseDef &data)
+std::vector<VarDef> createVars(const CaseDef &data)
 {
     const MemQualifier payloadQualifier = getMemQualifier(data);
-    return std::vector<BufferDef>{{"payload", payloadQualifier, data.payloadSC, data.payloadType, data.payloadMemLocal},
-                                  {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
+    return std::vector<VarDef>{{"payload", payloadQualifier, data.payloadSC, data.payloadType, data.payloadMemLocal},
+                               {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
 class MixedAccessTestCase : public MemoryModelTestCase
@@ -98,7 +98,7 @@ private:
 };
 
 MixedAccessTestCase::MixedAccessTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {data.stage, data.core11}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {data.stage, data.core11}, createVars(data))
     , m_data(data)
 {
 }
@@ -123,8 +123,8 @@ void MixedAccessTestCase::checkSupport(Context &context) const
     if (m_data.syncScope == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context);
 
-    checkSupportBuffers(context);
-    checkSupportBufferAtomics(context, "payload");
+    checkSupportVars(context);
+    checkSupportVarAtomics(context, "payload");
     checkSupportStageAtomics(context);
 }
 
@@ -135,14 +135,14 @@ std::string MixedAccessTestCase::declareSpvIntrinsics() const
 
     std::ostringstream css;
     css << "#extension GL_EXT_spirv_intrinsics : enable\n"
-        << declareBufferSpvIntrinsics("payload", m_data.visScope == SCOPE_DEVICE);
+        << declareVarSpvIntrinsics("payload", m_data.visScope == SCOPE_DEVICE);
     return css.str();
 }
 
 std::string MixedAccessTestCase::initProgram() const
 {
     const Scope syncScope = m_data.syncScope;
-    const DataType type   = getBuffer("payload").type;
+    const DataType type   = getVar("payload").type;
     const char *typeStr   = gl_type(type);
 
     std::string loadPayload;
