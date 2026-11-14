@@ -90,8 +90,8 @@ bool isSplitBarrier(SyncType syncType)
 
 Scope getMappingScope(const CaseDef &data)
 {
-    const bool hasSharedBuffer = data.payloadSC == SC_WORKGROUP || (hasGuard(data) && data.guardSC == SC_WORKGROUP);
-    if ((data.scope == SCOPE_DEVICE || data.scope == SCOPE_QUEUEFAMILY) && hasSharedBuffer)
+    const bool hasSharedVar = data.payloadSC == SC_WORKGROUP || (hasGuard(data) && data.guardSC == SC_WORKGROUP);
+    if ((data.scope == SCOPE_DEVICE || data.scope == SCOPE_QUEUEFAMILY) && hasSharedVar)
     {
         return SCOPE_WORKGROUP;
     }
@@ -107,17 +107,17 @@ MemQualifier getMemQualifier(const CaseDef &data)
     return scopeToQualifier(data.scope);
 }
 
-std::vector<BufferDef> createBuffers(const CaseDef &data)
+std::vector<VarDef> createVars(const CaseDef &data)
 {
     const MemQualifier payloadQualifier = getMemQualifier(data);
-    std::vector<BufferDef> buffers{{"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal}};
+    std::vector<VarDef> vars{{"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal}};
     if (hasGuard(data))
     {
         const MemQualifier guardQualifier = data.guardSC == SC_IMAGE ? payloadQualifier : MEM_NONE;
-        buffers.push_back({"guard", guardQualifier, data.guardSC, data.dataType, data.guardMemLocal});
+        vars.push_back({"guard", guardQualifier, data.guardSC, data.dataType, data.guardMemLocal});
     }
-    buffers.push_back({"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true});
-    return buffers;
+    vars.push_back({"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true});
+    return vars;
 }
 
 class MessagePassingTestCase : public MemoryModelTestCase
@@ -132,7 +132,7 @@ private:
 };
 
 MessagePassingTestCase::MessagePassingTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {data.stage, data.core11}, createBuffers(data))
+    : MemoryModelTestCase(context, name, {data.stage, data.core11}, createVars(data))
     , m_data(data)
 {
 }
@@ -157,9 +157,9 @@ void MessagePassingTestCase::checkSupport(Context &context) const
     if (m_data.scope == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context);
 
-    checkSupportBuffers(context);
+    checkSupportVars(context);
     if (hasGuard(m_data))
-        checkSupportBufferAtomics(context, "guard");
+        checkSupportVarAtomics(context, "guard");
     checkSupportStageAtomics(context);
 }
 
@@ -167,14 +167,14 @@ std::string MessagePassingTestCase::initProgram() const
 {
     const uint32_t semAv      = (m_data.testType == TT_WAR || m_data.coherent) ? 0u : uint32_t(SEM_AVAILABLE);
     const uint32_t semVis     = (m_data.testType == TT_WAR || m_data.coherent) ? 0u : uint32_t(SEM_VISIBLE);
-    const uint32_t semPayload = getBufferSemantics("payload");
-    const uint32_t semGuard   = hasGuard(m_data) ? getBufferSemantics("guard") : 0;
+    const uint32_t semPayload = getVarSemantics("payload");
+    const uint32_t semGuard   = hasGuard(m_data) ? getVarSemantics("guard") : 0;
     const uint32_t semRel     = SEM_RELEASE | semPayload | semAv;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload | semVis;
     const uint32_t semAcqRel  = SEM_ACQUIRE_RELEASE | semPayload | semAv | semVis;
     const Scope scope         = m_data.scope;
 
-    const DataType type        = getBuffer("payload").type;
+    const DataType type        = getVar("payload").type;
     const char *typeStr        = gl_type(type);
     const std::string expected = (m_data.testType == TT_MP) ? (std::string{typeStr} + "(invocationIdPartner)") : "0";
 

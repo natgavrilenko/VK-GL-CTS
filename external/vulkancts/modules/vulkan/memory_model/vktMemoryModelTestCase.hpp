@@ -95,7 +95,7 @@ enum MemQualifier
     MEM_COHERENT,
 };
 
-struct BufferDef
+struct VarDef
 {
     const char *name;
     MemQualifier qual;
@@ -163,17 +163,16 @@ public:
     TestInstance *createInstance(Context &context) const final;
 
 protected:
-    MemoryModelTestCase(tcu::TestContext &context, const char *name, const ParamsDef &params,
-                        std::vector<BufferDef> buffers)
+    MemoryModelTestCase(tcu::TestContext &context, const char *name, const ParamsDef &params, std::vector<VarDef> vars)
         : TestCase(context, name)
         , m_params(params)
-        , m_buffers(std::move(buffers))
+        , m_vars(std::move(vars))
     {
     }
 
     // Hooks for initPrograms, initProgram must be overridden, the declarations are empty by default
     virtual std::string initProgram() const = 0;
-    virtual std::string declareSharedVariables() const
+    virtual std::string declareSharedVars() const
     {
         return {};
     }
@@ -183,8 +182,8 @@ protected:
     }
 
     // Helper functions to check support
-    void checkSupportBuffers(const Context &context) const;
-    void checkSupportBufferAtomics(const Context &context, const char *name) const;
+    void checkSupportVars(const Context &context) const;
+    void checkSupportVarAtomics(const Context &context, const char *name) const;
     void checkSupportStageAtomics(const Context &context) const;
     void checkSupportSubgroupFeatures(const Context &context, uint32_t minSize = 2) const;
     void checkSupportSplitBarriers(const Context &context) const;
@@ -192,9 +191,9 @@ protected:
     // Helper function to initialize partner thread coordinates
     std::string initPartnerCoordinates(Scope scope, const char *suffix = "") const;
     std::string initMultiPartnerCoordinates(Scope scope, uint32_t numPartners) const;
-    std::string initBufferCoordinates(const char *suffix, const char *pos) const;
+    std::string initVarCoordinates(const char *suffix, const char *pos) const;
 
-    // Helper functions to construct glsl instructions with respect to buffer type
+    // Helper functions to construct glsl instructions with respect to variable type
     static const char *gl_barrier();
     static std::string gl_controlBarrier(Scope scope1, Scope scope2, uint32_t sem);
     static std::string gl_controlBarrierArrive(Scope scope1, Scope scope2, uint32_t sem);
@@ -211,15 +210,15 @@ protected:
     static std::string gl_toUint(DataType type, const std::string &expr);
 
     // Helper functions for SPIR-V intrinsics
-    std::string declareBufferSpvIntrinsics(const char *name, bool hasDeviceScope) const;
+    std::string declareVarSpvIntrinsics(const char *name, bool hasDeviceScope) const;
     std::string spv_load(const char *name, const char *idx) const;
     std::string spv_load(const char *name, const char *idx, Scope scope) const;
     std::string spv_store(const char *name, const char *idx, const char *value) const;
     std::string spv_store(const char *name, const char *idx, const char *value, Scope scope) const;
 
-    // Helper functions for buffers
-    const BufferDef &getBuffer(const char *name) const;
-    uint32_t getBufferSemantics(const char *name) const;
+    // Helper functions for variables
+    const VarDef &getVar(const char *name) const;
+    uint32_t getVarSemantics(const char *name) const;
 
 private:
     std::string initPartners(Scope scope, uint32_t numPartners, bool isIndexRotation, const char *suffix) const;
@@ -227,7 +226,7 @@ private:
     bool hasDataType(DataType type) const;
 
     const ParamsDef m_params;
-    const std::vector<BufferDef> m_buffers;
+    const std::vector<VarDef> m_vars;
 };
 
 } // namespace MemoryModel

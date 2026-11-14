@@ -178,11 +178,11 @@ VkPipelineStageFlagBits getPipelineStageFlag(const Stage stage)
     }
 }
 
-MemoryRequirement getBufferMemoryRequirement(const BufferDef &buffer, bool isDeviceAddressSupported)
+MemoryRequirement getVarMemoryRequirement(const VarDef &var, bool isDeviceAddressSupported)
 {
-    const bool deviceAddress = isDeviceAddressSupported && buffer.sc == SC_PHYSBUFFER;
+    const bool deviceAddress = isDeviceAddressSupported && var.sc == SC_PHYSBUFFER;
     return (deviceAddress ? MemoryRequirement::DeviceAddress : MemoryRequirement::Any) |
-           (buffer.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal);
+           (var.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal);
 }
 
 } // namespace
@@ -215,7 +215,7 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
            "const uint gridDim = uint(DIM * NUM_WORKGROUP_EACH_DIM);\n";
 
     // Can be overridden by a child class, empty by default
-    css << declareSharedVariables();
+    css << declareSharedVars();
 
     if (m_params.stage == STAGE_COMPUTE)
     {
@@ -224,38 +224,38 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
 
     // Declare layout and collect push constant block for physical storage buffer
     std::ostringstream pcs;
-    for (size_t i = 0; i < m_buffers.size(); i++)
+    for (size_t i = 0; i < m_vars.size(); i++)
     {
-        const auto &buffer = m_buffers[i];
-        const char *name   = buffer.name;
+        const auto &var  = m_vars[i];
+        const char *name = var.name;
 
-        switch (buffer.sc)
+        switch (var.sc)
         {
         case SC_PHYSBUFFER:
         {
-            const char *ref = buffer.qual == MEM_NONE ? "" : "ref";
-            css << "layout(buffer_reference) buffer T" << name << "Ref { " << gl_type(buffer.type) << " x[]; };\n";
+            const char *ref = var.qual == MEM_NONE ? "" : "ref";
+            css << "layout(buffer_reference) buffer T" << name << "Ref { " << gl_type(var.type) << " x[]; };\n";
             pcs << "layout(offset = " << (i * DEVICE_ADDRESS_SIZE) << ") T" << name << "Ref " << name << ref << ";\n";
             break;
         }
         case SC_BUFFER:
         {
-            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(buffer.qual) << " buffer T" << name << " {\n"
-                << "   " << gl_type(buffer.type) << " x[];\n"
+            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(var.qual) << " buffer T" << name << " {\n"
+                << "   " << gl_type(var.type) << " x[];\n"
                 << "} " << name << ";\n";
             break;
         }
         case SC_IMAGE:
         {
-            const char *type1 = isIntType(buffer.type) ? "r32ui" : "r32f";
-            const char *type2 = isIntType(buffer.type) ? "uimage2D" : "image2D";
-            css << "layout(set=0, binding=" << i << ", " << type1 << ") uniform " << gl_qualifier(buffer.qual) << " "
+            const char *type1 = isIntType(var.type) ? "r32ui" : "r32f";
+            const char *type2 = isIntType(var.type) ? "uimage2D" : "image2D";
+            css << "layout(set=0, binding=" << i << ", " << type1 << ") uniform " << gl_qualifier(var.qual) << " "
                 << type2 << " " << name << ";\n";
             break;
         }
         case SC_WORKGROUP:
         {
-            css << "struct S" << name << " { " << gl_type(buffer.type) << " x[DIM*DIM]; };\n"
+            css << "struct S" << name << " { " << gl_type(var.type) << " x[DIM*DIM]; };\n"
                 << "shared S" << name << " " << name << ";\n";
             break;
         }
@@ -303,22 +303,22 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
 
     css << "   uint invocationId = getInvocationId(pos);\n";
 
-    for (const auto &buffer : m_buffers)
+    for (const auto &var : m_vars)
     {
-        if (buffer.sc == SC_PHYSBUFFER && buffer.qual != MEM_NONE)
+        if (var.sc == SC_PHYSBUFFER && var.qual != MEM_NONE)
         {
-            css << "   " << gl_qualifier(buffer.qual) << " T" << buffer.name << "Ref " << buffer.name << " = "
-                << buffer.name << "ref;\n";
+            css << "   " << gl_qualifier(var.qual) << " T" << var.name << "Ref " << var.name << " = " << var.name
+                << "ref;\n";
         }
     }
 
-    css << initBufferCoordinates("Coord", "pos");
+    css << initVarCoordinates("Coord", "pos");
 
     // Initialize shared memory
-    for (const auto &buffer : m_buffers)
+    for (const auto &var : m_vars)
     {
-        if (buffer.sc == SC_WORKGROUP)
-            css << "   " << buffer.name << ".x[" << buffer.name << "Coord] = 0;\n";
+        if (var.sc == SC_WORKGROUP)
+            css << "   " << var.name << ".x[" << var.name << "Coord] = 0;\n";
     }
 
     if (hasStorageClass(SC_WORKGROUP))
@@ -344,14 +344,14 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
     }
 }
 
-std::string MemoryModelTestCase::declareBufferSpvIntrinsics(const char *name, const bool hasDeviceScope) const
+std::string MemoryModelTestCase::declareVarSpvIntrinsics(const char *name, const bool hasDeviceScope) const
 {
     DE_ASSERT(!m_params.core11);
 
-    const BufferDef &buffer = getBuffer(name);
-    DE_ASSERT(buffer.sc != SC_IMAGE);
+    const VarDef &var = getVar(name);
+    DE_ASSERT(var.sc != SC_IMAGE);
 
-    const char *typeStr = gl_type(buffer.type);
+    const char *typeStr = gl_type(var.type);
 
     std::string capabilities =
         hasDeviceScope ? "capabilities = [" + std::to_string(SPV_CAPABILITY_DEVICE_SCOPE) + "], " : "";
@@ -393,9 +393,9 @@ std::string MemoryModelTestCase::initPartners(const Scope scope, const uint32_t 
     DE_ASSERT(numPartners >= 1 && (isIndexRotation || numPartners == 1));
 
     // Helpers to concatenate variable names with a suffix
-    const auto var        = [suffix](const char *name) { return std::string{name} + suffix; };
-    const auto partnerVar = [&](const char *name, const uint32_t i)
-    { return var(name) + (numPartners > 1 ? std::to_string(i) : std::string{}); };
+    const auto name        = [suffix](const char *base) { return std::string{base} + suffix; };
+    const auto partnerName = [&](const char *base, const uint32_t i)
+    { return name(base) + (numPartners > 1 ? std::to_string(i) : std::string{}); };
 
     // Group size is the number of partners plus the invocation itself
     const uint32_t groupSize = numPartners + 1;
@@ -434,79 +434,79 @@ std::string MemoryModelTestCase::initPartners(const Scope scope, const uint32_t 
     }
 
     std::ostringstream css;
-    css << "   uint " << var("size") << " = " << blockSize << ";\n"
-        << "   uint " << var("index") << " = " << blockIndex << ";\n";
+    css << "   uint " << name("size") << " = " << blockSize << ";\n"
+        << "   uint " << name("index") << " = " << blockIndex << ";\n";
 
     if (isIndexRotation)
     {
         // Rotate each partner's index by stride
-        css << "   uint " << var("stride") << " = " << var("size") << " / " << groupSize << "u;\n";
+        css << "   uint " << name("stride") << " = " << name("size") << " / " << groupSize << "u;\n";
         for (uint32_t i = 1; i <= numPartners; i++)
         {
-            css << "   uint " << partnerVar("indexPartner", i) << " = (" << var("index") << " + " << i << "u * "
-                << var("stride") << ") % (" << groupSize << "u * " << var("stride") << ");\n";
+            css << "   uint " << partnerName("indexPartner", i) << " = (" << name("index") << " + " << i << "u * "
+                << name("stride") << ") % (" << groupSize << "u * " << name("stride") << ");\n";
         }
         // An invocation is idle if it is left over after the last full group
-        css << "   bool " << var("idle") << " = " << var("index") << " >= " << groupSize << "u * " << var("stride")
+        css << "   bool " << name("idle") << " = " << name("index") << " >= " << groupSize << "u * " << name("stride")
             << ";\n";
     }
     else
     {
         // Mirror partner's index, assumes only one partner
-        css << "   uint " << partnerVar("indexPartner", 1) << " = " << var("size") << " - 1u - " << var("index")
+        css << "   uint " << partnerName("indexPartner", 1) << " = " << name("size") << " - 1u - " << name("index")
             << ";\n"
             // No invocation is left outside of a group, with odd block size the middle invocation maps to itself
-            << "   bool " << var("idle") << " = false;\n";
+            << "   bool " << name("idle") << " = false;\n";
     }
 
     // At subgroup scope, an invocation is also idle if any of its partners is inactive
     if (scope == SCOPE_SUBGROUP)
     {
-        css << "   uvec4 " << var("ballot") << " = subgroupBallot(true);\n";
+        css << "   uvec4 " << name("ballot") << " = subgroupBallot(true);\n";
         for (uint32_t i = 1; i <= numPartners; i++)
         {
-            css << "   " << var("idle") << " = " << var("idle") << " || !subgroupBallotBitExtract(" << var("ballot")
-                << ", " << partnerVar("indexPartner", i) << ");\n";
+            css << "   " << name("idle") << " = " << name("idle") << " || !subgroupBallotBitExtract(" << name("ballot")
+                << ", " << partnerName("indexPartner", i) << ");\n";
         }
     }
 
     // Returning from idle invocations can lead to barrier divergence, so we map idle invocations to themselves
     if (isIndexRotation || scope == SCOPE_SUBGROUP)
     {
-        css << "   if (" << var("idle") << ") {\n";
+        css << "   if (" << name("idle") << ") {\n";
         for (uint32_t i = 1; i <= numPartners; i++)
-            css << "      " << partnerVar("indexPartner", i) << " = " << var("index") << ";\n";
+            css << "      " << partnerName("indexPartner", i) << " = " << name("index") << ";\n";
         css << "   }\n";
     }
 
-    // Position, invocationId, and buffer coordinates for each partner
+    // Position, invocationId, and memory coordinates coordinates for each partner
     for (uint32_t i = 1; i <= numPartners; i++)
     {
-        const std::string posPartner = partnerVar("posPartner", i);
-        css << "   ivec2 " << posPartner << " = " << blockPos(partnerVar("indexPartner", i)) << ";\n"
-            << "   uint " << partnerVar("invocationIdPartner", i) << " = getInvocationId(" << posPartner << ");\n"
-            << initBufferCoordinates(partnerVar("CoordPartner", i).c_str(), posPartner.c_str());
+        const std::string posPartner = partnerName("posPartner", i);
+        css << "   ivec2 " << posPartner << " = " << blockPos(partnerName("indexPartner", i)) << ";\n"
+            << "   uint " << partnerName("invocationIdPartner", i) << " = getInvocationId(" << posPartner << ");\n"
+            << initVarCoordinates(partnerName("CoordPartner", i).c_str(), posPartner.c_str());
     }
 
     return css.str();
 }
 
-std::string MemoryModelTestCase::initBufferCoordinates(const char *suffix, const char *pos) const
+std::string MemoryModelTestCase::initVarCoordinates(const char *suffix, const char *pos) const
 {
     std::ostringstream css;
-    for (const auto &buffer : m_buffers)
+    for (const auto &var : m_vars)
     {
-        switch (buffer.sc)
+        switch (var.sc)
         {
         case SC_BUFFER:
         case SC_PHYSBUFFER:
-            css << "   uint " << buffer.name << suffix << " = getBufferCoord(" << pos << ");\n";
+            css << "   uint " << var.name << suffix << " = getBufferCoord(" << pos << ");\n";
             break;
         case SC_IMAGE:
-            css << "   ivec2 " << buffer.name << suffix << " = " << pos << ";\n";
+            css << "   ivec2 " << var.name << suffix << " = " << pos << ";\n";
             break;
         case SC_WORKGROUP:
-            css << "   uint " << buffer.name << suffix << " = getSharedCoord(" << pos << ");\n";
+            css << "   uint " << var.name << suffix << " = getSharedCoord(" << pos << ");\n";
             break;
         default:
             DE_ASSERT(0);
@@ -515,7 +515,7 @@ std::string MemoryModelTestCase::initBufferCoordinates(const char *suffix, const
     return css.str();
 }
 
-void MemoryModelTestCase::checkSupportBuffers(const Context &context) const
+void MemoryModelTestCase::checkSupportVars(const Context &context) const
 {
     if (hasDataType(DATA_TYPE_UINT64) && !context.getDeviceFeatures().shaderInt64)
         TCU_THROW(NotSupportedError, "64-bit integer type is not supported");
@@ -532,54 +532,54 @@ void MemoryModelTestCase::checkSupportBuffers(const Context &context) const
 
     const VkPhysicalDeviceMemoryProperties properties = getPhysicalDeviceMemoryProperties(vki, physDevice);
 
-    for (const auto &buffer : m_buffers)
+    for (const auto &var : m_vars)
     {
         // Vulkan has no 64-bit floating point images, so the tests must not create them
-        DE_ASSERT(buffer.sc != SC_IMAGE || buffer.type != DATA_TYPE_FLOAT64);
+        DE_ASSERT(var.sc != SC_IMAGE || var.type != DATA_TYPE_FLOAT64);
 
-        if (buffer.sc != SC_BUFFER && buffer.sc != SC_PHYSBUFFER)
+        if (var.sc != SC_BUFFER && var.sc != SC_PHYSBUFFER)
             continue;
 
-        const MemoryRequirement memReq = getBufferMemoryRequirement(buffer, isDeviceAddressSupported);
+        const MemoryRequirement memReq = getVarMemoryRequirement(var, isDeviceAddressSupported);
         if (getCompatibleMemoryTypes(properties, memReq) == 0)
             TCU_THROW(NotSupportedError, "Test variant uses memory type which is not supported");
     }
 }
 
-void MemoryModelTestCase::checkSupportBufferAtomics(const Context &context, const char *name) const
+void MemoryModelTestCase::checkSupportVarAtomics(const Context &context, const char *name) const
 {
-    const BufferDef &buffer = getBuffer(name);
+    const VarDef &var = getVar(name);
 
-    switch (buffer.type)
+    switch (var.type)
     {
     case DATA_TYPE_UINT64:
-        if ((buffer.sc == SC_BUFFER || buffer.sc == SC_PHYSBUFFER) &&
+        if ((var.sc == SC_BUFFER || var.sc == SC_PHYSBUFFER) &&
             !context.getShaderAtomicInt64Features().shaderBufferInt64Atomics)
             TCU_THROW(NotSupportedError, "64-bit integer buffer atomics not supported");
-        if (buffer.sc == SC_WORKGROUP && !context.getShaderAtomicInt64Features().shaderSharedInt64Atomics)
+        if (var.sc == SC_WORKGROUP && !context.getShaderAtomicInt64Features().shaderSharedInt64Atomics)
             TCU_THROW(NotSupportedError, "64-bit integer shared atomics not supported");
         break;
 
     case DATA_TYPE_FLOAT32:
         if (!context.isDeviceFunctionalitySupported("VK_EXT_shader_atomic_float"))
             TCU_THROW(NotSupportedError, "Missing extension: VK_EXT_shader_atomic_float");
-        if ((buffer.sc == SC_BUFFER || buffer.sc == SC_PHYSBUFFER) &&
+        if ((var.sc == SC_BUFFER || var.sc == SC_PHYSBUFFER) &&
             !context.getShaderAtomicFloatFeaturesEXT().shaderBufferFloat32Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat32: 32-bit floating point buffer atomics not supported");
-        if (buffer.sc == SC_IMAGE && !context.getShaderAtomicFloatFeaturesEXT().shaderImageFloat32Atomics)
+        if (var.sc == SC_IMAGE && !context.getShaderAtomicFloatFeaturesEXT().shaderImageFloat32Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat32: 32-bit floating point image atomics not supported");
-        if (buffer.sc == SC_WORKGROUP && !context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat32Atomics)
+        if (var.sc == SC_WORKGROUP && !context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat32Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat32: 32-bit floating point shared atomics not supported");
         break;
 
     case DATA_TYPE_FLOAT64:
         if (!context.isDeviceFunctionalitySupported("VK_EXT_shader_atomic_float"))
             TCU_THROW(NotSupportedError, "Missing extension: VK_EXT_shader_atomic_float");
-        if ((buffer.sc == SC_BUFFER || buffer.sc == SC_PHYSBUFFER) &&
+        if ((var.sc == SC_BUFFER || var.sc == SC_PHYSBUFFER) &&
             !context.getShaderAtomicFloatFeaturesEXT().shaderBufferFloat64Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat64: 64-bit floating point buffer atomics not supported");
-        // DATA_TYPE_FLOAT64 with SC_IMAGE is rejected in checkSupportBuffers
-        if (buffer.sc == SC_WORKGROUP && !context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat64Atomics)
+        // DATA_TYPE_FLOAT64 with SC_IMAGE is rejected in checkSupportVars
+        if (var.sc == SC_WORKGROUP && !context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat64Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat64: 64-bit floating point shared atomics not supported");
         break;
 
@@ -666,12 +666,12 @@ std::string MemoryModelTestCase::gl_memoryBarrier(const Scope scope, const uint3
 std::string MemoryModelTestCase::gl_atomicLoad(const char *name, const char *idx, const Scope scope,
                                                const uint32_t sem) const
 {
-    const BufferDef &buffer = getBuffer(name);
+    const VarDef &var = getVar(name);
     std::ostringstream css;
-    if (buffer.sc == SC_IMAGE)
-        css << "imageAtomicLoad(" << buffer.name << ", " << idx << ", ";
+    if (var.sc == SC_IMAGE)
+        css << "imageAtomicLoad(" << var.name << ", " << idx << ", ";
     else
-        css << "atomicLoad(" << buffer.name << ".x[" << idx << "], ";
+        css << "atomicLoad(" << var.name << ".x[" << idx << "], ";
     css << gl_scope(scope) << ", " << gl_semantics1(sem) << ", " << gl_semantics2(sem) << ")";
     return css.str();
 }
@@ -679,15 +679,15 @@ std::string MemoryModelTestCase::gl_atomicLoad(const char *name, const char *idx
 std::string MemoryModelTestCase::gl_atomicStore(const char *name, const char *idx, const char *value, const Scope scope,
                                                 const uint32_t sem) const
 {
-    const BufferDef &buffer = getBuffer(name);
-    const bool noCast       = is64BitType(buffer.type) && buffer.sc == SC_IMAGE;
-    const char *typeStr     = noCast ? "" : gl_type(buffer.type);
+    const VarDef &var   = getVar(name);
+    const bool noCast   = is64BitType(var.type) && var.sc == SC_IMAGE;
+    const char *typeStr = noCast ? "" : gl_type(var.type);
 
     std::ostringstream css;
-    if (buffer.sc == SC_IMAGE)
-        css << "imageAtomicStore(" << buffer.name << ", " << idx << ", ";
+    if (var.sc == SC_IMAGE)
+        css << "imageAtomicStore(" << var.name << ", " << idx << ", ";
     else
-        css << "atomicStore(" << buffer.name << ".x[" << idx << "], ";
+        css << "atomicStore(" << var.name << ".x[" << idx << "], ";
     css << typeStr << "(" << value << "), " << gl_scope(scope) << ", " << gl_semantics1(sem) << ", "
         << gl_semantics2(sem) << ")";
     return css.str();
@@ -696,15 +696,15 @@ std::string MemoryModelTestCase::gl_atomicStore(const char *name, const char *id
 std::string MemoryModelTestCase::gl_atomicExchange(const char *name, const char *idx, const char *value,
                                                    const Scope scope, const uint32_t sem) const
 {
-    const BufferDef &buffer = getBuffer(name);
-    const bool noCast       = is64BitType(buffer.type) && buffer.sc == SC_IMAGE;
-    const char *typeStr     = noCast ? "" : gl_type(buffer.type);
+    const VarDef &var   = getVar(name);
+    const bool noCast   = is64BitType(var.type) && var.sc == SC_IMAGE;
+    const char *typeStr = noCast ? "" : gl_type(var.type);
 
     std::ostringstream css;
-    if (buffer.sc == SC_IMAGE)
-        css << "imageAtomicExchange(" << buffer.name << ", " << idx << ", ";
+    if (var.sc == SC_IMAGE)
+        css << "imageAtomicExchange(" << var.name << ", " << idx << ", ";
     else
-        css << "atomicExchange(" << buffer.name << ".x[" << idx << "], ";
+        css << "atomicExchange(" << var.name << ".x[" << idx << "], ";
     css << typeStr << "(" << value << "), " << gl_scope(scope) << ", " << gl_semantics1(sem) << ", "
         << gl_semantics2(sem) << ")";
     return css.str();
@@ -712,33 +712,33 @@ std::string MemoryModelTestCase::gl_atomicExchange(const char *name, const char 
 
 std::string MemoryModelTestCase::gl_load(const char *name, const char *idx) const
 {
-    const BufferDef &buffer = getBuffer(name);
+    const VarDef &var = getVar(name);
     std::ostringstream css;
-    if (buffer.sc == SC_IMAGE)
-        css << "imageLoad(" << buffer.name << ", " << idx << ").x";
+    if (var.sc == SC_IMAGE)
+        css << "imageLoad(" << var.name << ", " << idx << ").x";
     else
-        css << buffer.name << ".x[" << idx << "]";
+        css << var.name << ".x[" << idx << "]";
     return css.str();
 }
 
 std::string MemoryModelTestCase::gl_store(const char *name, const char *idx, const char *value) const
 {
-    const BufferDef &buffer = getBuffer(name);
+    const VarDef &var = getVar(name);
     std::ostringstream css;
-    if (buffer.sc != SC_IMAGE)
-        css << buffer.name << ".x[" << idx << "] = " << gl_type(buffer.type) << "(" << value << ")";
-    else if (isIntType(buffer.type))
-        css << "imageStore(" << buffer.name << ", " << idx << ", uvec4(" << value << ", 0, 0, 0))";
+    if (var.sc != SC_IMAGE)
+        css << var.name << ".x[" << idx << "] = " << gl_type(var.type) << "(" << value << ")";
+    else if (isIntType(var.type))
+        css << "imageStore(" << var.name << ", " << idx << ", uvec4(" << value << ", 0, 0, 0))";
     else
-        css << "imageStore(" << buffer.name << ", " << idx << ", vec4(" << gl_type(buffer.type) << "(" << value
+        css << "imageStore(" << var.name << ", " << idx << ", vec4(" << gl_type(var.type) << "(" << value
             << "), 0, 0, 0))";
     return css.str();
 }
 
 std::string MemoryModelTestCase::spv_load(const char *name, const char *idx) const
 {
-    const BufferDef &buffer  = getBuffer(name);
-    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const VarDef &var        = getVar(name);
+    const uint32_t alignment = is64BitType(var.type) ? 8 : 4;
     const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER;
 
     std::ostringstream css;
@@ -749,8 +749,8 @@ std::string MemoryModelTestCase::spv_load(const char *name, const char *idx) con
 
 std::string MemoryModelTestCase::spv_load(const char *name, const char *idx, const Scope scope) const
 {
-    const BufferDef &buffer  = getBuffer(name);
-    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const VarDef &var        = getVar(name);
+    const uint32_t alignment = is64BitType(var.type) ? 8 : 4;
     const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER | SPV_MAKE_POINTER_VISIBLE;
 
     std::ostringstream css;
@@ -761,8 +761,8 @@ std::string MemoryModelTestCase::spv_load(const char *name, const char *idx, con
 
 std::string MemoryModelTestCase::spv_store(const char *name, const char *idx, const char *value) const
 {
-    const BufferDef &buffer  = getBuffer(name);
-    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const VarDef &var        = getVar(name);
+    const uint32_t alignment = is64BitType(var.type) ? 8 : 4;
     const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER;
 
     std::ostringstream css;
@@ -774,8 +774,8 @@ std::string MemoryModelTestCase::spv_store(const char *name, const char *idx, co
 std::string MemoryModelTestCase::spv_store(const char *name, const char *idx, const char *value,
                                            const Scope scope) const
 {
-    const BufferDef &buffer  = getBuffer(name);
-    const uint32_t alignment = is64BitType(buffer.type) ? 8 : 4;
+    const VarDef &var        = getVar(name);
+    const uint32_t alignment = is64BitType(var.type) ? 8 : 4;
     const uint32_t operands  = SPV_ALIGNED | SPV_NON_PRIVATE_POINTER | SPV_MAKE_POINTER_AVAILABLE;
 
     std::ostringstream css;
@@ -840,29 +840,29 @@ std::string MemoryModelTestCase::gl_toUint(const DataType type, const std::strin
     }
 }
 
-const BufferDef &MemoryModelTestCase::getBuffer(const char *name) const
+const VarDef &MemoryModelTestCase::getVar(const char *name) const
 {
-    for (const auto &buffer : m_buffers)
+    for (const auto &var : m_vars)
     {
-        if (name == std::string_view(buffer.name))
-            return buffer;
+        if (name == std::string_view(var.name))
+            return var;
     }
-    TCU_THROW(InternalError, std::string("Unknown buffer: ") + name);
+    TCU_THROW(InternalError, std::string("Unknown var: ") + name);
 }
 
 bool MemoryModelTestCase::hasStorageClass(const StorageClass sc) const
 {
-    return std::any_of(m_buffers.begin(), m_buffers.end(), [sc](const BufferDef &b) { return b.sc == sc; });
+    return std::any_of(m_vars.begin(), m_vars.end(), [sc](const VarDef &b) { return b.sc == sc; });
 }
 
 bool MemoryModelTestCase::hasDataType(const DataType type) const
 {
-    return std::any_of(m_buffers.begin(), m_buffers.end(), [type](const BufferDef &b) { return b.type == type; });
+    return std::any_of(m_vars.begin(), m_vars.end(), [type](const VarDef &b) { return b.type == type; });
 }
 
-uint32_t MemoryModelTestCase::getBufferSemantics(const char *name) const
+uint32_t MemoryModelTestCase::getVarSemantics(const char *name) const
 {
-    return scToSem(getBuffer(name).sc);
+    return scToSem(getVar(name).sc);
 }
 
 namespace
@@ -871,10 +871,10 @@ namespace
 class MemoryModelTestInstance : public vkt::MultiQueueRunnerTestInstance
 {
 public:
-    MemoryModelTestInstance(Context &context, Stage stage, const std::vector<BufferDef> &buffers)
+    MemoryModelTestInstance(Context &context, Stage stage, const std::vector<VarDef> &vars)
         : vkt::MultiQueueRunnerTestInstance(context, stage == STAGE_COMPUTE ? vkt::COMPUTE_QUEUE : vkt::GRAPHICS_QUEUE)
         , m_stage(stage)
-        , m_buffers(buffers)
+        , m_vars(vars)
     {
     }
 
@@ -882,7 +882,7 @@ public:
 
 private:
     const Stage m_stage;
-    const std::vector<BufferDef> m_buffers;
+    const std::vector<VarDef> m_vars;
 };
 
 tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueData)
@@ -906,35 +906,34 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     const uint32_t GRID_DIM               = DIM * NUM_WORKGROUP_EACH_DIM;
     const uint32_t NUM_INVOCATIONS        = GRID_DIM * GRID_DIM;
 
-    // Create buffers and images, the last buffer is always the result buffer
-    const uint32_t numBuffers      = static_cast<uint32_t>(m_buffers.size());
-    const uint32_t idxResultBuffer = numBuffers - 1;
-    DE_ASSERT(!m_buffers.empty() && m_buffers[idxResultBuffer].sc == SC_BUFFER &&
-              m_buffers[idxResultBuffer].type == DATA_TYPE_UINT);
+    // Create buffers and images, the last variable is always the result buffer
+    const uint32_t numVars      = static_cast<uint32_t>(m_vars.size());
+    const uint32_t idxResultVar = numVars - 1;
+    DE_ASSERT(!m_vars.empty() && m_vars[idxResultVar].sc == SC_BUFFER && m_vars[idxResultVar].type == DATA_TYPE_UINT);
 
-    std::vector<de::MovePtr<BufferWithMemory>> buffers(numBuffers);
-    std::vector<de::MovePtr<ImageWithMemory>> images(numBuffers);
-    std::vector<Move<VkImageView>> imageViews(numBuffers);
+    std::vector<de::MovePtr<BufferWithMemory>> buffers(numVars);
+    std::vector<de::MovePtr<ImageWithMemory>> images(numVars);
+    std::vector<Move<VkImageView>> imageViews(numVars);
 
     const bool isDeviceAddressSupported = m_context.isDeviceFunctionalitySupported("VK_KHR_buffer_device_address");
     const VkImageSubresourceRange range = makeImageSubresourceRange(VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u);
 
-    for (uint32_t i = 0; i < numBuffers; ++i)
+    for (uint32_t i = 0; i < numVars; ++i)
     {
-        const BufferDef &buffer = m_buffers[i];
+        const VarDef &var = m_vars[i];
 
-        switch (buffer.sc)
+        switch (var.sc)
         {
         case SC_BUFFER:
         case SC_PHYSBUFFER:
         {
-            const size_t elementSize       = is64BitType(buffer.type) ? sizeof(uint64_t) : sizeof(uint32_t);
+            const size_t elementSize       = is64BitType(var.type) ? sizeof(uint64_t) : sizeof(uint32_t);
             const size_t bufferSize        = NUM_INVOCATIONS * elementSize;
-            const MemoryRequirement memReq = getBufferMemoryRequirement(buffer, isDeviceAddressSupported);
+            const MemoryRequirement memReq = getVarMemoryRequirement(var, isDeviceAddressSupported);
             const VkBufferUsageFlags usageFlags =
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                (buffer.sc == SC_PHYSBUFFER ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0);
+                (var.sc == SC_PHYSBUFFER ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0);
 
             buffers[i] = de::MovePtr<BufferWithMemory>(
                 new BufferWithMemory(vk, device, allocator, makeBufferCreateInfo(bufferSize, usageFlags), memReq));
@@ -942,8 +941,8 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
         }
         case SC_IMAGE:
         {
-            const VkFormat imageFormat     = isIntType(buffer.type) ? VK_FORMAT_R32_UINT : VK_FORMAT_R32_SFLOAT;
-            const MemoryRequirement memReq = buffer.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal;
+            const VkFormat imageFormat     = isIntType(var.type) ? VK_FORMAT_R32_UINT : VK_FORMAT_R32_SFLOAT;
+            const MemoryRequirement memReq = var.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal;
 
             VkImageCreateInfo imageCreateInfo = initVulkanStructure();
             imageCreateInfo.imageType         = VK_IMAGE_TYPE_2D;
@@ -962,7 +961,7 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
             }
             catch (const tcu::NotSupportedError &)
             {
-                if (buffer.local)
+                if (var.local)
                     throw;
                 TCU_THROW(NotSupportedError, "Test variant uses non-device-local memory, which is not supported");
             }
@@ -980,11 +979,11 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
 
     // Initialize layout and descriptor set
     DescriptorSetLayoutBuilder layoutBuilder;
-    for (uint32_t i = 0; i < numBuffers; ++i)
+    for (uint32_t i = 0; i < numVars; ++i)
     {
-        if (m_buffers[i].sc == SC_BUFFER)
+        if (m_vars[i].sc == SC_BUFFER)
             layoutBuilder.addSingleIndexedBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, shaderStageFlags, i);
-        else if (m_buffers[i].sc == SC_IMAGE)
+        else if (m_vars[i].sc == SC_IMAGE)
             layoutBuilder.addSingleIndexedBinding(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, shaderStageFlags, i);
     }
 
@@ -992,22 +991,22 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
 
     const Unique<VkDescriptorPool> descriptorPool(
         DescriptorPoolBuilder()
-            .addType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, numBuffers)
-            .addType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, numBuffers)
+            .addType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, numVars)
+            .addType(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, numVars)
             .build(vk, device, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT, 1u));
 
     const Unique<VkDescriptorSet> descriptorSet(makeDescriptorSet(vk, device, *descriptorPool, *descriptorSetLayout));
 
     DescriptorSetUpdateBuilder setUpdateBuilder;
-    for (uint32_t i = 0; i < numBuffers; ++i)
+    for (uint32_t i = 0; i < numVars; ++i)
     {
-        if (m_buffers[i].sc == SC_BUFFER)
+        if (m_vars[i].sc == SC_BUFFER)
         {
             const VkDescriptorBufferInfo bufferInfo = makeDescriptorBufferInfo(**buffers[i], 0, VK_WHOLE_SIZE);
             setUpdateBuilder.writeSingle(*descriptorSet, DescriptorSetUpdateBuilder::Location::binding(i),
                                          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &bufferInfo);
         }
-        else if (m_buffers[i].sc == SC_IMAGE)
+        else if (m_vars[i].sc == SC_IMAGE)
         {
             const VkDescriptorImageInfo imageInfo =
                 makeDescriptorImageInfo(VK_NULL_HANDLE, *imageViews[i], VK_IMAGE_LAYOUT_GENERAL);
@@ -1017,11 +1016,11 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     }
     setUpdateBuilder.update(vk, device);
 
-    // Physical storage buffer addresses are push constants, at an offset given by the buffer index.
+    // Physical storage buffer addresses are push constants, at an offset given by the variable index.
     // The result buffer is never a physical storage buffer, so the range ends before it.
-    const VkPushConstantRange pushConstRange = {shaderStageFlags, 0, idxResultBuffer * DEVICE_ADDRESS_SIZE};
+    const VkPushConstantRange pushConstRange = {shaderStageFlags, 0, idxResultVar * DEVICE_ADDRESS_SIZE};
     const bool hasPhysBuffers =
-        std::any_of(m_buffers.begin(), m_buffers.end(), [](const BufferDef &b) { return b.sc == SC_PHYSBUFFER; });
+        std::any_of(m_vars.begin(), m_vars.end(), [](const VarDef &b) { return b.sc == SC_PHYSBUFFER; });
     const Unique<VkPipelineLayout> pipelineLayout(
         makePipelineLayout(vk, device, *descriptorSetLayout, hasPhysBuffers ? &pushConstRange : nullptr));
 
@@ -1112,11 +1111,11 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
         if (submit == 0)
         {
             // The result buffer is cleared once and collects the failures of all submits and iterations
-            vk.cmdFillBuffer(*cmdBuffer, **buffers[idxResultBuffer], 0, VK_WHOLE_SIZE, 0);
+            vk.cmdFillBuffer(*cmdBuffer, **buffers[idxResultVar], 0, VK_WHOLE_SIZE, 0);
 
-            for (uint32_t i = 0; i < numBuffers; ++i)
+            for (uint32_t i = 0; i < numVars; ++i)
             {
-                if (m_buffers[i].sc != SC_IMAGE)
+                if (m_vars[i].sc != SC_IMAGE)
                     continue;
 
                 const VkImageMemoryBarrier imageBarrier =
@@ -1130,9 +1129,9 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
         vk.cmdBindDescriptorSets(*cmdBuffer, bindPoint, *pipelineLayout, 0u, 1, &*descriptorSet, 0u, nullptr);
         vk.cmdBindPipeline(*cmdBuffer, bindPoint, *pipeline);
 
-        for (uint32_t i = 0; i < numBuffers; ++i)
+        for (uint32_t i = 0; i < numVars; ++i)
         {
-            if (m_buffers[i].sc != SC_PHYSBUFFER)
+            if (m_vars[i].sc != SC_PHYSBUFFER)
                 continue;
 
             const VkDeviceAddress address = getBufferDeviceAddress(vk, device, **buffers[i]);
@@ -1142,7 +1141,7 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
 
         for (uint32_t iteration = 0; iteration < NUM_ITERATIONS; iteration++)
         {
-            for (uint32_t i = 0; i < idxResultBuffer; ++i)
+            for (uint32_t i = 0; i < idxResultVar; ++i)
             {
                 if (buffers[i])
                     vk.cmdFillBuffer(*cmdBuffer, **buffers[i], 0, VK_WHOLE_SIZE, 0);
@@ -1178,7 +1177,7 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
 
         if (submit == NUM_SUBMITS - 1)
         {
-            vk.cmdCopyBuffer(*cmdBuffer, **buffers[idxResultBuffer], **copyBuffer, 1, &copyParams);
+            vk.cmdCopyBuffer(*cmdBuffer, **buffers[idxResultVar], **copyBuffer, 1, &copyParams);
             const VkMemoryBarrier transferToHost =
                 makeMemoryBarrier(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
             cmdPipelineMemoryBarrier(vk, *cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
@@ -1216,7 +1215,7 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
 
 TestInstance *MemoryModelTestCase::createInstance(Context &context) const
 {
-    return new MemoryModelTestInstance(context, m_params.stage, m_buffers);
+    return new MemoryModelTestInstance(context, m_params.stage, m_vars);
 }
 
 } // namespace MemoryModel
