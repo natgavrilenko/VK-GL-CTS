@@ -69,8 +69,7 @@ public:
     TransitiveSemanticsTestCase(tcu::TestContext &context, const char *name, const CaseDef &data);
     void checkSupport(Context &context) const override;
 
-private:
-    std::string initProgram() const override;
+protected:
     const CaseDef m_data;
 };
 
@@ -97,7 +96,16 @@ void TransitiveSemanticsTestCase::checkSupport(Context &context) const
     checkSupportVarAtomics(context, "guard2");
 }
 
-std::string TransitiveSemanticsTestCase::initProgram() const
+class TransitiveSemanticsCombinedTestCase : public TransitiveSemanticsTestCase
+{
+public:
+    using TransitiveSemanticsTestCase::TransitiveSemanticsTestCase;
+
+private:
+    std::string initProgram() const override;
+};
+
+std::string TransitiveSemanticsCombinedTestCase::initProgram() const
 {
     const Scope scope   = m_data.scope;
     const DataType type = getVar("payload").type;
@@ -128,19 +136,71 @@ std::string TransitiveSemanticsTestCase::initProgram() const
         << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", scope, semAcq1) << " == 0;\n"
         << "   if (!skip1) { " << gl_atomicStore("guard2", "guard2CoordPartner1", "1u", scope, semRel2) << "; }\n"
         << "   skip2 = " << gl_atomicLoad("guard2", "guard2Coord", scope, semAcq2) << " == 0;\n"
-        << "   if (!skip2) {\n"
-        << "      r = " << gl_load("payload", "payloadCoordPartner1") << ";\n"
-        << "      if (!idle && r != expected) {\n"
-        << "         " << gl_store("fail", "failCoord", "1") << ";\n"
-        << "      }\n"
+        << "   r = " << gl_load("payload", "payloadCoordPartner1") << ";\n"
+        << "   if (!idle && !skip2 && r != expected) {\n"
+        << "      " << gl_store("fail", "failCoord", "1") << ";\n"
            "   }\n";
 
     return css.str();
 }
 
-} // namespace
+class TransitiveSemanticsRelayTestCase : public TransitiveSemanticsTestCase
+{
+public:
+    using TransitiveSemanticsTestCase::TransitiveSemanticsTestCase;
 
-tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx)
+private:
+    std::string initProgram() const override;
+};
+
+std::string TransitiveSemanticsRelayTestCase::initProgram() const
+{
+    const Scope scope   = m_data.scope;
+    const DataType type = getVar("payload").type;
+    const char *typeStr = gl_type(type);
+
+    const uint32_t semPayload = getVarSemantics("payload");
+    const uint32_t semGuard1  = getVarSemantics("guard1");
+    const uint32_t semGuard2  = getVarSemantics("guard2");
+    const uint32_t semRel1    = SEM_RELEASE | semPayload | semGuard1;
+    const uint32_t semAcq1    = SEM_ACQUIRE | semPayload | semGuard1;
+    const uint32_t semRel2    = SEM_RELEASE | semPayload | semGuard2;
+    const uint32_t semAcq2    = SEM_ACQUIRE | semPayload | semGuard2;
+
+    std::ostringstream css;
+
+    css << initMultiPartnerCoordinates(m_data.scope, 2);
+
+    css << "   bool skip1 = false;\n"
+        << "   bool skip2 = false;\n"
+        << "   uint value = invocationId;\n"
+        << "   " << typeStr << " r = 0;\n"
+        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner1);\n";
+
+    // The role follows the position in the group, shifted by the group number
+    css << "   uint branchId = (index / stride + index % stride) % 3u;\n";
+
+    css << "   if (branchId == 0) {\n"
+        << "      " << gl_store("payload", "payloadCoord", "value") << ";\n"
+        << "      " << gl_atomicStore("guard1", "guard1CoordPartner1", "1u", scope, semRel1) << ";\n"
+        << "   }\n"
+        << "   else if (branchId == 1) {\n"
+        << "      skip1 = " << gl_atomicLoad("guard1", "guard1Coord", scope, semAcq1) << " == 0;\n"
+        << "      if (!skip1) { " << gl_atomicStore("guard2", "guard2CoordPartner1", "1u", scope, semRel2) << "; }\n"
+        << "   }\n"
+        << "   else {\n"
+        << "      skip2 = " << gl_atomicLoad("guard2", "guard2Coord", scope, semAcq2) << " == 0;\n"
+        << "      r = " << gl_load("payload", "payloadCoordPartner1") << ";\n"
+        << "      if (!idle && !skip2 && r != expected) {\n"
+        << "         " << gl_store("fail", "failCoord", "1") << ";\n"
+        << "      }\n"
+        << "   }\n";
+
+    return css.str();
+}
+
+template <typename PatternTestCase>
+void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
 {
     static const NamedValue<StorageClass> scCases[] = {
         // variable in buffer memory
@@ -180,7 +240,6 @@ tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx)
 
     const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
 
-    de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, "transitive_semantics"));
     for (const auto &[sc0, sc1, sc2, local0, local1, local2, type0, type1, type2, scope] :
          Combinations(scCases, scCases, scCases, localCases, localCases, localCases, typeCases, typeCases, typeCases,
                       scopeCases))
@@ -220,15 +279,24 @@ tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx)
             continue;
         }
 
-        addTestCase(*ttGroup,
-                    {groupName("payload", sc0.name), groupName("guard1", sc1.name), groupName("guard2", sc2.name),
+        addTestCase(root,
+                    {patternName, groupName("payload", sc0.name), groupName("guard1", sc1.name), groupName("guard2", sc2.name),
                      groupName("payload", local0.name), groupName("guard1", local1.name),
                      groupName("guard2", local2.name), groupName("payload", type0.name),
                      groupName("guard1", type1.name), groupName("guard2", type2.name)},
-                    new TransitiveSemanticsTestCase(testCtx, scope.name, c));
+                    new PatternTestCase(root.getTestContext(), scope.name, c));
     }
+}
 
-    return ttGroup.release();
+} // namespace
+
+tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx)
+{
+    de::MovePtr<tcu::TestCaseGroup> raGroup(new tcu::TestCaseGroup(testCtx, "transitive_semantics"));
+    addPatternTests<TransitiveSemanticsCombinedTestCase>(*raGroup, "combined");
+    addPatternTests<TransitiveSemanticsRelayTestCase>(*raGroup, "relay");
+
+    return raGroup.release();
 }
 
 } // namespace vkt::MemoryModel
