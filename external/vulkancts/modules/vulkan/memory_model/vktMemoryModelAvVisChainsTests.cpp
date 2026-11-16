@@ -56,7 +56,6 @@ struct CaseDef
     StorageClass payloadSC;
     StorageClass guardSC;
     SyncType syncType;
-    DataType dataType;
     bool transitiveVis;
 };
 
@@ -65,8 +64,8 @@ std::vector<VarDef> createVars(const CaseDef &data)
     const MemQualifier payloadQualifier = data.coherent ? MEM_WORKGROUP : MEM_NONPRIVATE;
     const MemQualifier guardQualifier   = data.guardSC == SC_IMAGE ? payloadQualifier : MEM_NONE;
     return std::vector<VarDef>{
-        {"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal},
-        {"guard", guardQualifier, data.guardSC, data.dataType, data.guardMemLocal},
+        {"payload", payloadQualifier, data.payloadSC, DATA_TYPE_UINT, data.payloadMemLocal},
+        {"guard", guardQualifier, data.guardSC, DATA_TYPE_UINT, data.guardMemLocal},
         {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true},
     };
 }
@@ -116,7 +115,7 @@ std::string AvVisChainsTestCase::declareSharedVars() const
 
 std::string AvVisChainsTestCase::initProgram() const
 {
-    const DataType type = getVar("payload").type;
+    const DataType type = DATA_TYPE_UINT;
     const char *typeStr = gl_type(type);
 
     const uint32_t semAv      = m_data.coherent ? 0u : uint32_t(SEM_AVAILABLE);
@@ -251,7 +250,6 @@ tcu::TestCaseGroup *createAvVisChainsTests(tcu::TestContext &testCtx)
             psc.value,      // StorageClass payloadSC;
             gsc.value,      // StorageClass guardSC;
             st.value,       // SyncType syncType;
-            DATA_TYPE_UINT, // DataType dataType;
             vis.value,      // bool transitiveVis;
         };
         addTestCase(*transGroup, {coh.name, st.name, pl.name, psc.name, gl.name, gsc.name},
