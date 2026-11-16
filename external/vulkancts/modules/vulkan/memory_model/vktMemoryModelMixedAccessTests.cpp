@@ -2,8 +2,6 @@
  * Vulkan Conformance Tests
  * ------------------------
  *
- * Copyright (c) 2017-2019 The Khronos Group Inc.
- * Copyright (c) 2018-2019 NVIDIA Corporation
  * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -45,8 +43,8 @@ struct CaseDef
 {
     bool core11;
     bool payloadMemLocal;
+    DataType dataType;
     StorageClass payloadSC;
-    DataType payloadType;
     Scope syncScope;
     std::optional<Scope> visScope;
     Stage stage;
@@ -81,7 +79,7 @@ bool usesLoadIntrinsic(const CaseDef &data)
 std::vector<VarDef> createVars(const CaseDef &data)
 {
     const MemQualifier payloadQualifier = getMemQualifier(data);
-    return std::vector<VarDef>{{"payload", payloadQualifier, data.payloadSC, data.payloadType, data.payloadMemLocal},
+    return std::vector<VarDef>{{"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal},
                                {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
@@ -163,20 +161,18 @@ std::string MixedAccessTestCase::initProgram() const
     css << initPartnerCoordinates(getMappingScope(m_data));
 
     css << "   uint value = invocationId;\n"
-        << "   " << typeStr << " r0 = 0;\n"
         << "   " << typeStr << " r1 = 0;\n"
+        << "   " << typeStr << " r2 = 0;\n"
         << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n";
 
     // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
     css << "   value += " << gl_toUint(type, loadPayload) << " >> 31;\n"
         << "   " << gl_atomicStore("payload", "payloadCoord", "value", syncScope, 0) << ";\n"
-        << "   r0 = " << gl_atomicLoad("payload", "payloadCoordPartner", syncScope, 0) << ";\n"
-        << "   if (r0 == expected) {\n"
-        << "      r1 = " << loadPayload << ";\n"
-        << "      if (!idle && r1 != expected) {\n"
-        << "         " << gl_store("fail", "failCoord", "1") << ";\n"
-        << "      }\n"
-           "   }\n";
+        << "   r1 = " << gl_atomicLoad("payload", "payloadCoordPartner", syncScope, 0) << ";\n"
+        << "   r2 = " << loadPayload << ";\n"
+        << "   if (!idle && r1 == expected && r2 != expected) {\n"
+        << "      " << gl_store("fail", "failCoord", "1") << ";\n"
+        << "   }\n";
 
     return css.str();
 }
@@ -186,48 +182,77 @@ std::string MixedAccessTestCase::initProgram() const
 tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
 {
     static const NamedValue<bool> core11Cases[] = {
+        // supported by Vulkan1.1
         {true, "core11"},
+        // requires VK_KHR_vulkan_memory_model extension
         {false, "ext"},
     };
 
     static const NamedValue<DataType> typeCases[] = {
+        // uint32_t atomics
         {DATA_TYPE_UINT, "u32"},
+        // uint64_t atomics
         {DATA_TYPE_UINT64, "u64"},
+        // float32 atomics
         {DATA_TYPE_FLOAT32, "f32"},
+        // float64 atomics
         {DATA_TYPE_FLOAT64, "f64"},
     };
 
-    static const NamedValue<bool> localCases[] = {
-        {false, "payload_nonlocal"},
-        {true, "payload_local"},
-    };
-
     static const NamedValue<StorageClass> scCases[] = {
+        // variable in buffer memory
         {SC_BUFFER, "buffer"},
+        // variable in image memory
         {SC_IMAGE, "image"},
+        // variable in workgroup memory
         {SC_WORKGROUP, "workgroup"},
+        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
+    static const NamedValue<bool> localCases[] = {
+        // variable in non-local memory
+        {false, "nonlocal"},
+        // variable in local memory
+        {true, "local"},
+    };
+
     static const NamedValue<Scope> syncScopeCases[] = {
+        // device scope
         {SCOPE_DEVICE, "device"},
+        // queue family scope
         {SCOPE_QUEUEFAMILY, "queuefamily"},
+        // workgroup scope
         {SCOPE_WORKGROUP, "workgroup"},
+        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
     static const NamedValue<std::optional<Scope>> visScopeCases[] = {
-        {std::nullopt, "nonprivate"},          {SCOPE_SUBGROUP, "vissubgroup"}, {SCOPE_WORKGROUP, "visworkgroup"},
-        {SCOPE_QUEUEFAMILY, "visqueuefamily"}, {SCOPE_DEVICE, "visdevice"},
+        // no visibility scope
+        {std::nullopt, "nonprivate"},
+        // subgroup scope visibility
+        {SCOPE_SUBGROUP, "vissubgroup"},
+        // workgroup scope visibility
+        {SCOPE_WORKGROUP, "visworkgroup"},
+        // queue family scope visibility
+        {SCOPE_QUEUEFAMILY, "visqueuefamily"},
+        // device scope visibility
+        {SCOPE_DEVICE, "visdevice"},
     };
 
     static const NamedValue<Stage> stageCases[] = {
+        // compute stage
         {STAGE_COMPUTE, "comp"},
+        // vertex stage
         {STAGE_VERTEX, "vert"},
+        // fragment stage
         {STAGE_FRAGMENT, "frag"},
     };
 
-    de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, "mixed_access"));
+    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "mixed_access"));
+
+    const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
 
     for (const auto &[core11, type, local, sc, syncScope, visScope, stage] :
          Combinations(core11Cases, typeCases, localCases, scCases, syncScopeCases, visScopeCases, stageCases))
@@ -235,17 +260,17 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
         CaseDef c = {
             core11.value,    // bool core11;
             local.value,     // bool payloadMemLocal;
+            type.value,      // DataType dataType;
             sc.value,        // StorageClass payloadSC;
-            type.value,      // DataType payloadType;
             syncScope.value, // Scope syncScope;
             visScope.value,  // std::optional<Scope> visScope;
             stage.value,     // Stage stage;
         };
 
-        // Mustpass11 tests should only exercise things we expect to work on existing implementations. Exclude
-        // noncoherent tests which require new extensions. Exclude queuefamily scope which doesn't exist in Vulkan 1.1.
-        // Exclude physical storage buffer which doesn't support coherent decoration.
-        if (c.core11 && (c.visScope || c.payloadType == DATA_TYPE_UINT64 || c.payloadType == DATA_TYPE_FLOAT64 ||
+        // Mustpass11 tests should only exercise variations that are expected to work without Vulkan memory model.
+        // Exclude explicit visibility scope, which requires Vulkan memory model. Exclude queue family scope which
+        // doesn't exist in Vulkan 1.1. Exclude physical storage buffer which doesn't support coherent decoration.
+        if (c.core11 && (c.visScope || c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64 ||
                          c.syncScope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER))
         {
             continue;
@@ -265,19 +290,19 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
         }
 
         // No 64-bit image types, so skip tests for 64-bit types
-        if (c.payloadSC == SC_IMAGE && (c.payloadType == DATA_TYPE_UINT64 || c.payloadType == DATA_TYPE_FLOAT64))
+        if (c.payloadSC == SC_IMAGE && (c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64))
         {
             continue;
         }
 
         const bool coherent = core11.value && !visScope.value.has_value();
-        addTestCase(
-            *ttGroup,
-            {core11.name, type.name, local.name, sc.name, syncScope.name, coherent ? "coherent" : visScope.name},
-            new MixedAccessTestCase(testCtx, stage.name, c));
+        addTestCase(*group,
+                    {core11.name, type.name, groupName("payload", local.name), sc.name, syncScope.name,
+                     coherent ? "coherent" : visScope.name},
+                    new MixedAccessTestCase(testCtx, stage.name, c));
     }
 
-    return ttGroup.release();
+    return group.release();
 }
 
 } // namespace vkt::MemoryModel

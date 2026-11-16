@@ -6,8 +6,10 @@ include_directories(
 set(DEQP_VK_MEMORY_MODEL_SRCS
 	vktMemoryModelAmberTests.cpp
 	vktMemoryModelAmberTests.hpp
-	vktMemoryModelAvVisChainsTests.cpp
-	vktMemoryModelAvVisChainsTests.hpp
+	vktMemoryModelChainsTests.cpp
+	vktMemoryModelChainsTests.hpp
+	vktMemoryModelChainsWithBarrierTests.cpp
+	vktMemoryModelChainsWithBarrierTests.hpp
 	vktMemoryModelMessagePassingTests.cpp
 	vktMemoryModelMessagePassingTests.hpp
 	vktMemoryModelMixedAccessTests.cpp
@@ -22,10 +24,10 @@ set(DEQP_VK_MEMORY_MODEL_SRCS
 	vktMemoryModelSharedLayoutTests.hpp
 	vktMemoryModelTestCase.cpp
 	vktMemoryModelTestCase.hpp
-	vktMemoryModelTransitiveSemanticsTests.cpp
-	vktMemoryModelTransitiveSemanticsTests.hpp
 	vktMemoryModelTests.cpp
 	vktMemoryModelTests.hpp
+	vktMemoryModelTransitiveSemanticsTests.cpp
+	vktMemoryModelTransitiveSemanticsTests.hpp
 	vktMemoryModelUtil.cpp
 	vktMemoryModelUtil.hpp
 	../util/vktTypeComparisonUtil.hpp

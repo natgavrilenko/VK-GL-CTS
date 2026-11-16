@@ -2,6 +2,8 @@
  * Vulkan Conformance Tests
  * ------------------------
  *
+ * Copyright (c) 2017-2019 The Khronos Group Inc.
+ * Copyright (c) 2018-2019 NVIDIA Corporation
  * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,7 +26,8 @@
 #include "vktMemoryModelTests.hpp"
 
 #include "vktMemoryModelAmberTests.hpp"
-#include "vktMemoryModelAvVisChainsTests.hpp"
+#include "vktMemoryModelChainsTests.hpp"
+#include "vktMemoryModelChainsWithBarrierTests.hpp"
 #include "vktMemoryModelMessagePassingTests.hpp"
 #include "vktMemoryModelMixedAccessTests.hpp"
 #include "vktMemoryModelPaddingTests.hpp"
@@ -47,7 +50,8 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const std::string &na
 #ifndef CTS_USES_VULKANSC
     group->addChild(createAmberTests(testCtx));
 #endif // CTS_USES_VULKANSC
-    group->addChild(createAvVisChainsTests(testCtx));
+    group->addChild(createChainsTests(testCtx));
+    group->addChild(createChainsWithBarrierTests(testCtx));
     group->addChild(createMessagePassingTests(testCtx));
     group->addChild(createMixedAccessTests(testCtx));
     group->addChild(createPaddingTests(testCtx));

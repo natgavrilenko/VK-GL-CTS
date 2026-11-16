@@ -1,9 +1,11 @@
-#ifndef _VKTMEMORYMODELAVVISCHAINSTESTS_HPP
-#define _VKTMEMORYMODELAVVISCHAINSTESTS_HPP
+#ifndef _VKTMEMORYMODELCHAINSWITHBARRIERTESTS_HPP
+#define _VKTMEMORYMODELCHAINSWITHBARRIERTESTS_HPP
 /*-------------------------------------------------------------------------
  * Vulkan Conformance Tests
  * ------------------------
  *
+ * Copyright (c) 2017-2019 The Khronos Group Inc.
+ * Copyright (c) 2018-2019 NVIDIA Corporation
  * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +22,7 @@
  *
  *//*!
  * \file
- * \brief Memory Model Availability-Visibility Chains Tests
+ * \brief Memory Model Chains With Barrier Tests
  *//*--------------------------------------------------------------------*/
 
 #include "tcuDefs.hpp"
@@ -31,9 +33,9 @@ namespace vkt
 namespace MemoryModel
 {
 
-tcu::TestCaseGroup *createAvVisChainsTests(tcu::TestContext &testCtx);
+tcu::TestCaseGroup *createChainsWithBarrierTests(tcu::TestContext &testCtx);
 
 } // namespace MemoryModel
 } // namespace vkt
 
-#endif // _VKTMEMORYMODELAVVISCHAINSTESTS_HPP
+#endif // _VKTMEMORYMODELCHAINSWITHBARRIERTESTS_HPP
