@@ -46,37 +46,16 @@ struct CaseDef
     StorageClass payloadSC;
     StorageClass guard1SC;
     StorageClass guard2SC;
-    Scope scopeNear;
-    Scope scopeFar;
-    DataType dataType;
+    Scope nearScope;
+    Scope farScope;
     Stage stage;
 };
 
-// A helper function to compare scopes by the number of affected threads.
-// The test instance doesn't map invocations across queue families,
-// so queue family and device scopes are treated as equal.
-int scopeWidth(Scope scope)
-{
-    switch (scope)
-    {
-    case SCOPE_SUBGROUP:
-        return 0;
-    case SCOPE_WORKGROUP:
-        return 1;
-    case SCOPE_QUEUEFAMILY:
-    case SCOPE_DEVICE:
-        return 2;
-    default:
-        DE_ASSERT(0);
-        return -1;
-    }
-}
-
 std::vector<VarDef> createVars(const CaseDef &data)
 {
-    return std::vector<VarDef>{{"payload", MEM_NONE, data.payloadSC, data.dataType, data.payloadMemLocal},
-                               {"guard1", MEM_NONE, data.guard1SC, data.dataType, data.guard1MemLocal},
-                               {"guard2", MEM_NONE, data.guard2SC, data.dataType, data.guard2MemLocal},
+    return std::vector<VarDef>{{"payload", MEM_NONE, data.payloadSC, DATA_TYPE_UINT, data.payloadMemLocal},
+                               {"guard1", MEM_NONE, data.guard1SC, DATA_TYPE_UINT, data.guard1MemLocal},
+                               {"guard2", MEM_NONE, data.guard2SC, DATA_TYPE_UINT, data.guard2MemLocal},
                                {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
@@ -105,12 +84,12 @@ void RepeatedAccessTestCase::checkSupport(Context &context) const
     if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModel)
         TCU_THROW(NotSupportedError, "vulkanMemoryModel not supported");
 
-    if (m_data.scopeFar == SCOPE_DEVICE && !context.getVulkanMemoryModelFeatures().vulkanMemoryModelDeviceScope)
+    if (m_data.farScope == SCOPE_DEVICE && !context.getVulkanMemoryModelFeatures().vulkanMemoryModelDeviceScope)
     {
         TCU_THROW(NotSupportedError, "vulkanMemoryModelDeviceScope not supported");
     }
 
-    if (m_data.scopeNear == SCOPE_SUBGROUP)
+    if (m_data.nearScope == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context);
 
     checkSupportVars(context);
@@ -123,15 +102,15 @@ std::string RepeatedAccessTestCase::declareSpvIntrinsics() const
 {
     std::ostringstream css;
     css << "#extension GL_EXT_spirv_intrinsics : enable\n"
-        << declareVarSpvIntrinsics("payload", m_data.scopeFar == SCOPE_DEVICE);
+        << declareVarSpvIntrinsics("payload", m_data.farScope == SCOPE_DEVICE);
     return css.str();
 }
 
 class ShadowedStoreIncTestCase : public RepeatedAccessTestCase
 {
 public:
-    static constexpr bool nearFirst = true;
     using RepeatedAccessTestCase::RepeatedAccessTestCase;
+    static constexpr bool nearFirst = true;
 
 private:
     std::string initProgram() const override;
@@ -140,35 +119,33 @@ private:
 std::string ShadowedStoreIncTestCase::initProgram() const
 {
     const char *typeStr       = gl_type(getVar("payload").type);
-    const Scope scopeNear     = m_data.scopeNear;
-    const Scope scopeFar      = m_data.scopeFar;
+    const Scope nearScope     = m_data.nearScope;
+    const Scope farScope      = m_data.farScope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semRel     = SEM_RELEASE | semPayload;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload;
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(m_data.scopeNear, "Near")
-        << initPartnerCoordinates(m_data.scopeFar, "Far");
+    css << initPartnerCoordinates(m_data.nearScope, "Near");
+    css << initPartnerCoordinates(m_data.farScope, "Far");
 
-    css << "   bool skip1;\n"
-        << "   bool skip2;\n"
+    css << "   bool skip1 = false;\n"
+        << "   bool skip2 = false;\n"
         << "   uint value = invocationId;\n"
         << "   " << typeStr << " r = 0;\n"
         << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartnerFar);\n"
-        << "   " << spv_store("payload", "payloadCoordPartnerNear", "value", scopeNear) << ";\n"
-        << "   " << gl_atomicStore("guard1", "guard1CoordPartnerNear", "1u", scopeNear, semRel) << ";\n"
-        << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", scopeNear, semAcq) << " == 0;\n"
+        << "   " << spv_store("payload", "payloadCoordPartnerNear", "value", nearScope) << ";\n"
+        << "   " << gl_atomicStore("guard1", "guard1CoordPartnerNear", "1u", nearScope, semRel) << ";\n"
+        << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", nearScope, semAcq) << " == 0;\n"
         << "   if (!skip1) {\n"
-        << "      " << spv_store("payload", "payloadCoord", "value", scopeFar) << ";\n"
-        << "      " << gl_atomicStore("guard2", "guard2Coord", "1u", scopeFar, semRel) << ";\n"
+        << "      " << spv_store("payload", "payloadCoord", "value", farScope) << ";\n"
+        << "      " << gl_atomicStore("guard2", "guard2Coord", "1u", farScope, semRel) << ";\n"
         << "   }\n"
-        << "   skip2 = " << gl_atomicLoad("guard2", "guard2CoordPartnerFar", scopeFar, semAcq) << " == 0;\n"
-        << "   if (!skip2) {\n"
-        << "      r = " << spv_load("payload", "payloadCoordPartnerFar", scopeFar) << ";\n"
-        << "      if (!idleNear && !idleFar && r != expected) {\n"
-        << "         " << gl_store("fail", "failCoord", "1") << ";\n"
-        << "      }\n"
+        << "   skip2 = " << gl_atomicLoad("guard2", "guard2CoordPartnerFar", farScope, semAcq) << " == 0;\n"
+        << "   r = " << spv_load("payload", "payloadCoordPartnerFar", farScope) << ";\n"
+        << "   if (!idleNear && !idleFar && !skip2 && r != expected) {\n"
+        << "      " << gl_store("fail", "failCoord", "1") << ";\n"
         << "   }\n";
 
     return css.str();
@@ -177,8 +154,8 @@ std::string ShadowedStoreIncTestCase::initProgram() const
 class ShadowedStoreDecTestCase : public RepeatedAccessTestCase
 {
 public:
-    static constexpr bool nearFirst = false;
     using RepeatedAccessTestCase::RepeatedAccessTestCase;
+    static constexpr bool nearFirst = false;
 
 private:
     std::string initProgram() const override;
@@ -187,35 +164,33 @@ private:
 std::string ShadowedStoreDecTestCase::initProgram() const
 {
     const char *typeStr       = gl_type(getVar("payload").type);
-    const Scope scopeNear     = m_data.scopeNear;
-    const Scope scopeFar      = m_data.scopeFar;
+    const Scope nearScope     = m_data.nearScope;
+    const Scope farScope      = m_data.farScope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semRel     = SEM_RELEASE | semPayload;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload;
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(m_data.scopeNear, "Near")
-        << initPartnerCoordinates(m_data.scopeFar, "Far");
+    css << initPartnerCoordinates(m_data.nearScope, "Near");
+    css << initPartnerCoordinates(m_data.farScope, "Far");
 
-    css << "   bool skip1;\n"
-        << "   bool skip2;\n"
+    css << "   bool skip1 = false;\n"
+        << "   bool skip2 = false;\n"
         << "   uint value = invocationId;\n"
         << "   " << typeStr << " r = 0;\n"
         << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartnerNear);\n"
-        << "   " << spv_store("payload", "payloadCoordPartnerFar", "value", scopeFar) << ";\n"
-        << "   " << gl_atomicStore("guard1", "guard1CoordPartnerFar", "1u", scopeFar, semRel) << ";\n"
-        << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", scopeFar, semAcq) << " == 0;\n"
+        << "   " << spv_store("payload", "payloadCoordPartnerFar", "value", farScope) << ";\n"
+        << "   " << gl_atomicStore("guard1", "guard1CoordPartnerFar", "1u", farScope, semRel) << ";\n"
+        << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", farScope, semAcq) << " == 0;\n"
         << "   if (!skip1) {\n"
-        << "      " << spv_store("payload", "payloadCoord", "value", scopeNear) << ";\n"
-        << "      " << gl_atomicStore("guard2", "guard2Coord", "1u", scopeNear, semRel) << ";\n"
+        << "      " << spv_store("payload", "payloadCoord", "value", nearScope) << ";\n"
+        << "      " << gl_atomicStore("guard2", "guard2Coord", "1u", nearScope, semRel) << ";\n"
         << "   }\n"
-        << "   skip2 = " << gl_atomicLoad("guard2", "guard2CoordPartnerNear", scopeNear, semAcq) << " == 0;\n"
-        << "   if (!skip2) {\n"
-        << "      r = " << spv_load("payload", "payloadCoordPartnerNear", scopeNear) << ";\n"
-        << "      if (!idleNear && !idleFar && r != expected) {\n"
-        << "         " << gl_store("fail", "failCoord", "1") << ";\n"
-        << "      }\n"
+        << "   skip2 = " << gl_atomicLoad("guard2", "guard2CoordPartnerNear", nearScope, semAcq) << " == 0;\n"
+        << "   r = " << spv_load("payload", "payloadCoordPartnerNear", nearScope) << ";\n"
+        << "   if (!idleNear && !idleFar && !skip2 && r != expected) {\n"
+        << "      " << gl_store("fail", "failCoord", "1") << ";\n"
         << "   }\n";
 
     return css.str();
@@ -224,8 +199,8 @@ std::string ShadowedStoreDecTestCase::initProgram() const
 class ObservedLoadTestCase : public RepeatedAccessTestCase
 {
 public:
-    static constexpr bool nearFirst = false;
     using RepeatedAccessTestCase::RepeatedAccessTestCase;
+    static constexpr bool nearFirst = false;
 
 private:
     std::string initProgram() const override;
@@ -234,35 +209,33 @@ private:
 std::string ObservedLoadTestCase::initProgram() const
 {
     const char *typeStr       = gl_type(getVar("payload").type);
-    const Scope scopeNear     = m_data.scopeNear;
-    const Scope scopeFar      = m_data.scopeFar;
+    const Scope nearScope     = m_data.nearScope;
+    const Scope farScope      = m_data.farScope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semRel     = SEM_RELEASE | semPayload;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload;
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(m_data.scopeNear, "Near")
-        << initPartnerCoordinates(m_data.scopeFar, "Far");
+    css << initPartnerCoordinates(m_data.nearScope, "Near");
+    css << initPartnerCoordinates(m_data.farScope, "Far");
 
-    css << "   bool skip1;\n"
-        << "   bool skip2;\n"
+    css << "   bool skip1 = false;\n"
+        << "   bool skip2 = false;\n"
         << "   uint value = invocationIdPartnerFar;\n"
         << "   " << typeStr << " r1 = 0;\n"
         << "   " << typeStr << " r2 = 0;\n"
         << "   " << typeStr << " expected1 = " << typeStr << "(invocationId);\n"
         << "   " << typeStr << " expected2 = " << typeStr << "(invocationIdPartnerNear);\n"
-        << "   " << spv_store("payload", "payloadCoordPartnerFar", "value", scopeFar) << ";\n"
-        << "   " << gl_atomicStore("guard1", "guard1CoordPartnerFar", "1u", scopeFar, semRel) << ";\n"
-        << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", scopeFar, semAcq) << " == 0;\n"
+        << "   " << spv_store("payload", "payloadCoordPartnerFar", "value", farScope) << ";\n"
+        << "   " << gl_atomicStore("guard1", "guard1CoordPartnerFar", "1u", farScope, semRel) << ";\n"
+        << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", farScope, semAcq) << " == 0;\n"
         << "   if (!skip1) {\n"
-        << "      r1 = " << spv_load("payload", "payloadCoord", scopeFar) << ";\n"
-        << "      " << gl_atomicStore("guard2", "guard2Coord", "1u", scopeNear, semRel) << ";\n"
+        << "      r1 = " << spv_load("payload", "payloadCoord", farScope) << ";\n"
+        << "      " << gl_atomicStore("guard2", "guard2Coord", "1u", nearScope, semRel) << ";\n"
         << "   }\n"
-        << "   skip2 = " << gl_atomicLoad("guard2", "guard2CoordPartnerNear", scopeNear, semAcq) << " == 0;\n"
-        << "   if (!skip2) {\n"
-        << "      r2 = " << spv_load("payload", "payloadCoordPartnerNear", scopeNear) << ";\n"
-        << "   }\n"
+        << "   skip2 = " << gl_atomicLoad("guard2", "guard2CoordPartnerNear", nearScope, semAcq) << " == 0;\n"
+        << "   r2 = " << spv_load("payload", "payloadCoordPartnerNear", nearScope) << ";\n"
         << "   if (!idleNear && !idleFar && ((!skip1 && r1 != expected1) || (!skip2 && r2 != expected2))) {\n"
         << "      " << gl_store("fail", "failCoord", "1") << ";\n"
         << "   }\n";
@@ -270,45 +243,49 @@ std::string ObservedLoadTestCase::initProgram() const
     return css.str();
 }
 
-template <typename PatternTestCase>
-void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
+template <typename VariantTestCase>
+void addRepeatedAccessTests(tcu::TestCaseGroup &root, const char *variantName)
 {
     static const NamedValue<StorageClass> scCases[] = {
+        // variable in buffer memory
         {SC_BUFFER, "buffer"},
+        // variable in workgroup memory
         {SC_WORKGROUP, "workgroup"},
+        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
     static const NamedValue<bool> localCases[] = {
+        // variable in non-local memory
         {false, "nonlocal"},
+        // variable in local memory
         {true, "local"},
     };
 
-    static const NamedValue<DataType> typeCases[] = {
-        {DATA_TYPE_UINT, "u32"},
-        {DATA_TYPE_UINT64, "u64"},
-        {DATA_TYPE_FLOAT32, "f32"},
-        {DATA_TYPE_FLOAT64, "f64"},
-    };
-
     static const NamedValue<Scope> scopeCases[] = {
+        // device scope
         {SCOPE_DEVICE, "device"},
+        // queue family scope
         {SCOPE_QUEUEFAMILY, "queuefamily"},
+        // workgroup scope
         {SCOPE_WORKGROUP, "workgroup"},
+        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
     static const NamedValue<Stage> stageCases[] = {
+        // compute stage
         {STAGE_COMPUTE, "comp"},
+        // vertex stage
         {STAGE_VERTEX, "vert"},
+        // fragment stage
         {STAGE_FRAGMENT, "frag"},
     };
 
     const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
 
-    for (const auto &[sc0, sc1, sc2, local0, local1, local2, scope0, scope1, type, stage] :
-         Combinations(scCases, scCases, scCases, localCases, localCases, localCases, scopeCases, scopeCases, typeCases,
-                      stageCases))
+    for (const auto &[local0, sc0, local1, sc1, local2, sc2, scope0, scope1, stage] : Combinations(
+             localCases, scCases, localCases, scCases, localCases, scCases, scopeCases, scopeCases, stageCases))
     {
         const CaseDef c = {
             local0.value, // bool payloadMemLocal;
@@ -317,26 +294,24 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
             sc0.value,    // StorageClass payloadSC;
             sc1.value,    // StorageClass guard1SC;
             sc2.value,    // StorageClass guard2SC;
-            scope0.value, // Scope scopeNear;
-            scope1.value, // Scope scopeFar;
-            type.value,   // DataType dataType;
+            scope0.value, // Scope nearScope;
+            scope1.value, // Scope farScope;
             stage.value,  // Stage stage;
         };
 
-        // Near scope should be strictly narrower than far scope
-        if (scopeWidth(c.scopeNear) >= scopeWidth(c.scopeFar))
+        // Near scope must be narrower than far scope, skip queue family nearScope because tests run in the same queue
+        if (c.nearScope >= c.farScope || c.nearScope == SCOPE_QUEUEFAMILY)
         {
             continue;
         }
 
-        // Skip tests where a variable is in workgroup, but its accesses have a larger scopes.
-        // The payload is shared at both scopes, each guard at the scope of its step.
-        const Scope guard1Scope = PatternTestCase::nearFirst ? c.scopeNear : c.scopeFar;
-        const Scope guard2Scope = PatternTestCase::nearFirst ? c.scopeFar : c.scopeNear;
-        const int wgScopeWidth  = scopeWidth(SCOPE_WORKGROUP);
-        if ((c.payloadSC == SC_WORKGROUP && scopeWidth(c.scopeFar) > wgScopeWidth) ||
-            (c.guard1SC == SC_WORKGROUP && scopeWidth(guard1Scope) > wgScopeWidth) ||
-            (c.guard2SC == SC_WORKGROUP && scopeWidth(guard2Scope) > wgScopeWidth))
+        // Skip tests where a variable is in workgroup memory, but its accesses have larger scopes.
+        // Payload is shared at both scopes, each guard at the scope of its step.
+        const Scope guard1Scope = VariantTestCase::nearFirst ? c.nearScope : c.farScope;
+        const Scope guard2Scope = VariantTestCase::nearFirst ? c.farScope : c.nearScope;
+        if ((c.payloadSC == SC_WORKGROUP && c.farScope > SCOPE_WORKGROUP) ||
+            (c.guard1SC == SC_WORKGROUP && guard1Scope > SCOPE_WORKGROUP) ||
+            (c.guard2SC == SC_WORKGROUP && guard2Scope > SCOPE_WORKGROUP))
         {
             continue;
         }
@@ -349,7 +324,7 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
         }
 
         // Workgroup scope requires compute stage
-        if (c.stage != STAGE_COMPUTE && (c.scopeNear == SCOPE_WORKGROUP || c.scopeFar == SCOPE_WORKGROUP))
+        if (c.stage != STAGE_COMPUTE && (c.nearScope == SCOPE_WORKGROUP || c.farScope == SCOPE_WORKGROUP))
         {
             continue;
         }
@@ -362,11 +337,10 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
         }
 
         addTestCase(root,
-                    {patternName, groupName("payload", sc0.name), groupName("guard1", sc1.name),
-                     groupName("guard2", sc2.name), groupName("payload", local0.name), groupName("guard1", local1.name),
-                     groupName("guard2", local2.name), groupName("near", scope0.name), groupName("far", scope1.name),
-                     type.name},
-                    new PatternTestCase(root.getTestContext(), stage.name, c));
+                    {variantName, groupName("payload", local0.name), sc0.name, groupName("guard1", local1.name),
+                     sc1.name, groupName("guard2", local2.name), sc2.name, groupName("near", scope0.name),
+                     groupName("far", scope1.name)},
+                    new VariantTestCase(root.getTestContext(), stage.name, c));
     }
 }
 
@@ -374,13 +348,13 @@ void addPatternTests(tcu::TestCaseGroup &root, const char *patternName)
 
 tcu::TestCaseGroup *createRepeatedAccessTests(tcu::TestContext &testCtx)
 {
-    de::MovePtr<tcu::TestCaseGroup> raGroup(new tcu::TestCaseGroup(testCtx, "repeated_access"));
+    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "repeated_access"));
 
-    addPatternTests<ShadowedStoreIncTestCase>(*raGroup, "shadowed_store_inc");
-    addPatternTests<ShadowedStoreDecTestCase>(*raGroup, "shadowed_store_dec");
-    addPatternTests<ObservedLoadTestCase>(*raGroup, "observed_load");
+    addRepeatedAccessTests<ShadowedStoreIncTestCase>(*group, "shadowed_store_inc");
+    addRepeatedAccessTests<ShadowedStoreDecTestCase>(*group, "shadowed_store_dec");
+    addRepeatedAccessTests<ObservedLoadTestCase>(*group, "observed_load");
 
-    return raGroup.release();
+    return group.release();
 }
 
 } // namespace vkt::MemoryModel

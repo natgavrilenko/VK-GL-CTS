@@ -63,17 +63,17 @@ enum SyncType
 
 struct CaseDef
 {
+    bool core11;
     bool payloadMemLocal;
     bool guardMemLocal;
     bool coherent;
-    bool core11;
     TestType testType;
+    DataType dataType;
     StorageClass payloadSC;
     StorageClass guardSC;
-    Scope scope;
     SyncType syncType;
+    Scope scope;
     Stage stage;
-    DataType dataType;
 };
 
 bool hasGuard(const CaseDef &data)
@@ -252,27 +252,29 @@ std::string MessagePassingTestCase::initProgram() const
     }
 
     if (m_data.testType == TT_MP)
-        css << "   if (!idle && !skip) {\n"
-            << "      r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
-            << "      if (r != expected) { " << gl_store("fail", "failCoord", "1") << "; }\n"
+        css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
+            << "   if (!idle && !skip && r != expected) {\n"
+            << "      " << gl_store("fail", "failCoord", "1") << ";\n"
             << "   }\n";
     else
         css << "   if (!skip) { " << gl_store("payload", "payloadCoord", "value") << "; }\n"
-            << "   if (!idle && r != expected) { " << gl_store("fail", "failCoord", "1") << "; }\n";
+            << "   if (!idle && r != expected) {\n"
+            << "      " << gl_store("fail", "failCoord", "1") << ";\n"
+            << "   }\n";
 
     return css.str();
 }
 
-tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const char *groupName, TestType testType)
+tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName, TestType testType)
 {
     static const NamedValue<bool> core11Cases[] = {
-        // Supported by Vulkan1.1
+        // supported by Vulkan1.1
         {true, "core11"},
-        // Requires VK_KHR_vulkan_memory_model extension
+        // requires VK_KHR_vulkan_memory_model extension
         {false, "ext"},
     };
 
-    static const NamedValue<DataType> dtCases[] = {
+    static const NamedValue<DataType> typeCases[] = {
         // uint32_t atomics
         {DATA_TYPE_UINT, "u32"},
         // uint64_t atomics
@@ -283,14 +285,25 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const char *groupName
         {DATA_TYPE_FLOAT64, "f64"},
     };
 
-    static const NamedValue<bool> cohCases[] = {
-        // coherent payload variable
-        {true, "coherent"},
-        // noncoherent payload variable
-        {false, "noncoherent"},
+    static const NamedValue<StorageClass> scCases[] = {
+        // variable in buffer memory
+        {SC_BUFFER, "buffer"},
+        // variable in image memory
+        {SC_IMAGE, "image"},
+        // variable in workgroup memory
+        {SC_WORKGROUP, "workgroup"},
+        // variable in physical storage buffer memory
+        {SC_PHYSBUFFER, "physbuffer"},
     };
 
-    static const NamedValue<SyncType> stCases[] = {
+    static const NamedValue<bool> localCases[] = {
+        // variable in non-local memory
+        {false, "nonlocal"},
+        // variable in local memory
+        {true, "local"},
+    };
+
+    static const NamedValue<SyncType> syncCases[] = {
         // release fence, acquire fence
         {ST_FENCE_FENCE, "fence_fence"},
         // release fence, atomic acquire
@@ -314,85 +327,66 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const char *groupName
     // Atomic RMW variants exist only for atomic release and acquire (ST_ATOMIC_ATOMIC),
     // where they replace the atomic store and load with exchanges (ST_ATOMIC_RMW)
     static const NamedValue<bool> rmwCases[] = {
+        // atomic store or atomic load
         {false, "atomicwrite"},
+        // atomic read-modify-write
         {true, "atomicrmw"},
     };
 
     static const NamedValue<Scope> scopeCases[] = {
+        // device scope
         {SCOPE_DEVICE, "device"},
+        // queue family scope
         {SCOPE_QUEUEFAMILY, "queuefamily"},
+        // workgroup scope
         {SCOPE_WORKGROUP, "workgroup"},
+        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
-    static const NamedValue<bool> plCases[] = {
-        // payload variable in non-local memory
-        {false, "payload_nonlocal"},
-        // payload variable in local memory
-        {true, "payload_local"},
-    };
-
-    static const NamedValue<StorageClass> pscCases[] = {
-        // payload variable in buffer memory
-        {SC_BUFFER, "buffer"},
-        // payload variable in image memory
-        {SC_IMAGE, "image"},
-        // payload variable in workgroup memory
-        {SC_WORKGROUP, "workgroup"},
-        // payload variable in physical storage buffer memory
-        {SC_PHYSBUFFER, "physbuffer"},
-    };
-
-    static const NamedValue<bool> glCases[] = {
-        // guard variable in non-local memory
-        {false, "guard_nonlocal"},
-        // guard variable in local memory
-        {true, "guard_local"},
-    };
-
-    static const NamedValue<StorageClass> gscCases[] = {
-        // guard variable in buffer memory
-        {SC_BUFFER, "buffer"},
-        // guard variable in image memory
-        {SC_IMAGE, "image"},
-        // guard variable in workgroup memory
-        {SC_WORKGROUP, "workgroup"},
-        // guard variable in physical storage buffer memory
-        {SC_PHYSBUFFER, "physbuffer"},
+    static const NamedValue<bool> cohCases[] = {
+        // coherent variable
+        {true, "coherent"},
+        // noncoherent variable
+        {false, "noncoherent"},
     };
 
     static const NamedValue<Stage> stageCases[] = {
+        // compute stage
         {STAGE_COMPUTE, "comp"},
+        // vertex stage
         {STAGE_VERTEX, "vert"},
+        // fragment stage
         {STAGE_FRAGMENT, "frag"},
     };
 
-    de::MovePtr<tcu::TestCaseGroup> ttGroup(new tcu::TestCaseGroup(testCtx, groupName));
+    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, variantName));
 
-    for (const auto &[core11, dt, coh, st, rmw, scope, pl, psc, gl, gsc, stage] :
-         Combinations(core11Cases, dtCases, cohCases, stCases, rmwCases, scopeCases, plCases, pscCases, glCases,
-                      gscCases, stageCases))
+    const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
+
+    for (const auto &[core11, type, local0, sc0, local1, sc1, sync, rmw, scope, coh, stage] :
+         Combinations(core11Cases, typeCases, localCases, scCases, localCases, scCases, syncCases, rmwCases, scopeCases,
+                      cohCases, stageCases))
     {
-        const SyncType syncType = rmw.value ? ST_ATOMIC_RMW : st.value;
+        const SyncType syncType = rmw.value ? ST_ATOMIC_RMW : sync.value;
 
         CaseDef c = {
-            pl.value,     // bool payloadMemLocal;
-            gl.value,     // bool guardMemLocal;
-            coh.value,    // bool coherent;
             core11.value, // bool core11;
+            local0.value, // bool payloadMemLocal;
+            local1.value, // bool guardMemLocal;
+            coh.value,    // bool coherent;
             testType,     // TestType testType;
-            psc.value,    // StorageClass payloadSC;
-            gsc.value,    // StorageClass guardSC;
-            scope.value,  // Scope scope;
+            type.value,   // DataType dataType;
+            sc0.value,    // StorageClass payloadSC;
+            sc1.value,    // StorageClass guardSC;
             syncType,     // SyncType syncType;
+            scope.value,  // Scope scope;
             stage.value,  // Stage stage;
-            dt.value,     // DataType dataType;
         };
 
-        // Mustpass11 tests should only exercise things we expect to work on existing implementations. Exclude
-        // noncoherent tests which require new extensions, and assume atomic synchronization wouldn't work (i.e. atomics
-        // may be implemented as relaxed atomics). Exclude queuefamily scope which doesn't exist in Vulkan 1.1. Exclude
-        // physical storage buffer which doesn't support the legacy decorations.
+        // Mustpass11 tests should only exercise variations that are expected to work without Vulkan memory model.
+        // Exclude noncoherent tests, 64-bit data types, and release-acquire atomics. Exclude queue family scope which
+        // doesn't exist in Vulkan 1.1. Exclude physical storage buffer which doesn't support coherent decoration.
         if (c.core11 && (c.coherent == 0 || c.syncType == ST_FENCE_ATOMIC || c.syncType == ST_ATOMIC_FENCE ||
                          c.syncType == ST_ATOMIC_ATOMIC || c.syncType == ST_ATOMIC_RMW ||
                          c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64 ||
@@ -449,37 +443,37 @@ tcu::TestCaseGroup *createTests(tcu::TestContext &testCtx, const char *groupName
         {
             continue;
         }
-        // Barrier tests have no guard, so only run them with gsc,gl==0
+        // Barrier tests have no guard, so only run them when c.guardSC and c.guardMemLocal are zero
         if (!hasGuard(c) && (c.guardSC != 0 || c.guardMemLocal != 0))
         {
             continue;
         }
 
         // Atomic RMW is only tested with atomic release and acquire
-        if (rmw.value && st.value != ST_ATOMIC_ATOMIC)
+        if (rmw.value && sync.value != ST_ATOMIC_ATOMIC)
         {
             continue;
         }
 
-        addTestCase(
-            *ttGroup,
-            {core11.name, dt.name, coh.name, st.name, rmw.name, scope.name, pl.name, psc.name, gl.name, gsc.name},
-            new MessagePassingTestCase(testCtx, stage.name, c));
+        addTestCase(*group,
+                    {core11.name, type.name, coh.name, sync.name, rmw.name, scope.name,
+                     groupName("payload", local0.name), sc0.name, groupName("guard", local1.name), sc1.name},
+                    new MessagePassingTestCase(testCtx, stage.name, c));
     }
 
-    return ttGroup.release();
+    return group.release();
 }
 
 } // namespace
 
 tcu::TestCaseGroup *createMessagePassingTests(tcu::TestContext &testCtx)
 {
-    return createTests(testCtx, "message_passing", TT_MP);
+    return addTests(testCtx, "message_passing", TT_MP);
 }
 
 tcu::TestCaseGroup *createWriteAfterReadTests(tcu::TestContext &testCtx)
 {
-    return createTests(testCtx, "write_after_read", TT_WAR);
+    return addTests(testCtx, "write_after_read", TT_WAR);
 }
 
 } // namespace vkt::MemoryModel

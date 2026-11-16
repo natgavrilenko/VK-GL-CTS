@@ -55,13 +55,14 @@ enum StorageClass
     SC_PHYSBUFFER,
 };
 
+// From narrowest to widest, used to compare scopes
 enum Scope
 {
-    SCOPE_DEVICE = 0,
-    SCOPE_QUEUEFAMILY,
-    SCOPE_WORKGROUP,
+    SCOPE_INVOCATION = 0,
     SCOPE_SUBGROUP,
-    SCOPE_INVOCATION,
+    SCOPE_WORKGROUP,
+    SCOPE_QUEUEFAMILY,
+    SCOPE_DEVICE,
 };
 
 enum Semantics
@@ -188,10 +189,10 @@ protected:
     void checkSupportSubgroupFeatures(const Context &context, uint32_t minSize = 2) const;
     void checkSupportSplitBarriers(const Context &context) const;
 
-    // Helper function to initialize partner thread coordinates
+    // Helper function to initialize coordinates of partner invocations
     std::string initPartnerCoordinates(Scope scope, const char *suffix = "") const;
     std::string initMultiPartnerCoordinates(Scope scope, uint32_t numPartners) const;
-    std::string initVarCoordinates(const char *suffix, const char *pos) const;
+    std::string initVarCoordinates(const char *pos, const char *suffix) const;
 
     // Helper functions to construct glsl instructions with respect to variable type
     static const char *gl_barrier();

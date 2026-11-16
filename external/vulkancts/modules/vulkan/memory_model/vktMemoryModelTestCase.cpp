@@ -240,9 +240,8 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
         }
         case SC_BUFFER:
         {
-            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(var.qual) << " buffer T" << name << " {\n"
-                << "   " << gl_type(var.type) << " x[];\n"
-                << "} " << name << ";\n";
+            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(var.qual) << " buffer T" << name << " { "
+                << gl_type(var.type) << " x[]; } " << name << ";\n";
             break;
         }
         case SC_IMAGE:
@@ -312,7 +311,7 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
         }
     }
 
-    css << initVarCoordinates("Coord", "pos");
+    css << initVarCoordinates("pos", "Coord");
 
     // Initialize shared memory
     for (const auto &var : m_vars)
@@ -479,19 +478,19 @@ std::string MemoryModelTestCase::initPartners(const Scope scope, const uint32_t 
         css << "   }\n";
     }
 
-    // Position, invocationId, and memory coordinates coordinates for each partner
+    // Position, invocationId, and memory coordinates for each partner
     for (uint32_t i = 1; i <= numPartners; i++)
     {
         const std::string posPartner = partnerName("posPartner", i);
         css << "   ivec2 " << posPartner << " = " << blockPos(partnerName("indexPartner", i)) << ";\n"
             << "   uint " << partnerName("invocationIdPartner", i) << " = getInvocationId(" << posPartner << ");\n"
-            << initVarCoordinates(partnerName("CoordPartner", i).c_str(), posPartner.c_str());
+            << initVarCoordinates(posPartner.c_str(), partnerName("CoordPartner", i).c_str());
     }
 
     return css.str();
 }
 
-std::string MemoryModelTestCase::initVarCoordinates(const char *suffix, const char *pos) const
+std::string MemoryModelTestCase::initVarCoordinates(const char *pos, const char *suffix) const
 {
     std::ostringstream css;
     for (const auto &var : m_vars)

@@ -2,8 +2,6 @@
  * Vulkan Conformance Tests
  * ------------------------
  *
- * Copyright (c) 2017-2019 The Khronos Group Inc.
- * Copyright (c) 2018-2019 NVIDIA Corporation
  * Copyright (c) 2026 Huawei Technologies Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");

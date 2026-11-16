@@ -20,10 +20,10 @@
  *
  *//*!
  * \file
- * \brief Memory Model Availability-Visibility Chains Tests
+ * \brief Memory Model Chains With Barrier Tests
  *//*--------------------------------------------------------------------*/
 
-#include "vktMemoryModelAvVisChainsTests.hpp"
+#include "vktMemoryModelChainsWithBarrierTests.hpp"
 #include "vktMemoryModelTestCase.hpp"
 #include "vktMemoryModelUtil.hpp"
 
@@ -53,10 +53,10 @@ struct CaseDef
     bool payloadMemLocal;
     bool guardMemLocal;
     bool coherent;
+    bool transitiveVis;
     StorageClass payloadSC;
     StorageClass guardSC;
     SyncType syncType;
-    bool transitiveVis;
 };
 
 std::vector<VarDef> createVars(const CaseDef &data)
@@ -70,10 +70,10 @@ std::vector<VarDef> createVars(const CaseDef &data)
     };
 }
 
-class AvVisChainsTestCase : public MemoryModelTestCase
+class ChainsWithBarrierTestCase : public MemoryModelTestCase
 {
 public:
-    AvVisChainsTestCase(tcu::TestContext &context, const char *name, const CaseDef &data);
+    ChainsWithBarrierTestCase(tcu::TestContext &context, const char *name, const CaseDef &data);
     void checkSupport(Context &context) const override;
 
 private:
@@ -82,13 +82,13 @@ private:
     const CaseDef m_data;
 };
 
-AvVisChainsTestCase::AvVisChainsTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
+ChainsWithBarrierTestCase::ChainsWithBarrierTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
     : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createVars(data))
     , m_data(data)
 {
 }
 
-void AvVisChainsTestCase::checkSupport(Context &context) const
+void ChainsWithBarrierTestCase::checkSupport(Context &context) const
 {
     if (!context.contextSupports(vk::ApiVersion(0, 1, 1, 0)))
         TCU_THROW(NotSupportedError, "Vulkan 1.1 not supported");
@@ -106,16 +106,16 @@ void AvVisChainsTestCase::checkSupport(Context &context) const
     checkSupportVarAtomics(context, "guard");
 }
 
-std::string AvVisChainsTestCase::declareSharedVars() const
+std::string ChainsWithBarrierTestCase::declareSharedVars() const
 {
     if (m_data.transitiveVis)
         return std::string{"shared bool sharedSkip;\n"};
     return {};
 }
 
-std::string AvVisChainsTestCase::initProgram() const
+std::string ChainsWithBarrierTestCase::initProgram() const
 {
-    const DataType type = DATA_TYPE_UINT;
+    const DataType type = getVar("payload").type;
     const char *typeStr = gl_type(type);
 
     const uint32_t semAv      = m_data.coherent ? 0u : uint32_t(SEM_AVAILABLE);
@@ -128,9 +128,10 @@ std::string AvVisChainsTestCase::initProgram() const
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(SCOPE_DEVICE)
-        << "   ivec2 groupPosPartner = posPartner - posPartner % DIM;\n"
-        << initVarCoordinates("GroupCoordPartner", "groupPosPartner");
+    css << initPartnerCoordinates(SCOPE_DEVICE);
+
+    css << "   ivec2 groupPosPartner = posPartner - posPartner % DIM;\n"
+        << initVarCoordinates("groupPosPartner", "GroupCoordPartner");
 
     css << "   bool skip = false;\n"
         << "   uint value = invocationId;\n"
@@ -155,8 +156,7 @@ std::string AvVisChainsTestCase::initProgram() const
     }
 
     if (m_data.syncType == ST_ATOMIC_ATOMIC || m_data.syncType == ST_FENCE_ATOMIC)
-        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, semAcq)
-            << " == 0;\n";
+        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, semAcq) << " == 0;\n";
     else
         css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, 0) << " == 0;\n"
             << "       " << gl_memoryBarrier(SCOPE_DEVICE, semAcq | semGuard) << ";\n";
@@ -170,9 +170,9 @@ std::string AvVisChainsTestCase::initProgram() const
             << "   skip = sharedSkip;\n";
     }
 
-    css << "   if (!idle && !skip) {\n"
-        << "      r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
-        << "      if (r != expected) { " << gl_store("fail", "failCoord", "1") << "; }\n"
+    css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
+        << "   if (!idle && !skip && r != expected) {\n"
+        << "      " << gl_store("fail", "failCoord", "1") << ";\n"
         << "   }\n";
 
     return css.str();
@@ -180,16 +180,25 @@ std::string AvVisChainsTestCase::initProgram() const
 
 } // namespace
 
-tcu::TestCaseGroup *createAvVisChainsTests(tcu::TestContext &testCtx)
+tcu::TestCaseGroup *createChainsWithBarrierTests(tcu::TestContext &testCtx)
 {
-    static const NamedValue<bool> cohCases[] = {
-        // coherent payload variable
-        {true, "coherent"},
-        // noncoherent payload variable
-        {false, "noncoherent"},
+    static const NamedValue<StorageClass> scCases[] = {
+        // variable in buffer memory
+        {SC_BUFFER, "buffer"},
+        // variable in image memory
+        {SC_IMAGE, "image"},
+        // variable in physical storage buffer memory
+        {SC_PHYSBUFFER, "physbuffer"},
     };
 
-    static const NamedValue<SyncType> stCases[] = {
+    static const NamedValue<bool> localCases[] = {
+        // variable in non-local memory
+        {false, "nonlocal"},
+        // variable in local memory
+        {true, "local"},
+    };
+
+    static const NamedValue<SyncType> syncCases[] = {
         // release fence, acquire fence
         {ST_FENCE_FENCE, "fence_fence"},
         // release fence, atomic acquire
@@ -200,36 +209,11 @@ tcu::TestCaseGroup *createAvVisChainsTests(tcu::TestContext &testCtx)
         {ST_ATOMIC_ATOMIC, "atomic_atomic"},
     };
 
-    static const NamedValue<bool> plCases[] = {
-        // payload variable in non-local memory
-        {false, "payload_nonlocal"},
-        // payload variable in local memory
-        {true, "payload_local"},
-    };
-
-    static const NamedValue<StorageClass> pscCases[] = {
-        // payload variable in buffer memory
-        {SC_BUFFER, "buffer"},
-        // payload variable in image memory
-        {SC_IMAGE, "image"},
-        // payload variable in physical storage buffer memory
-        {SC_PHYSBUFFER, "physbuffer"},
-    };
-
-    static const NamedValue<bool> glCases[] = {
-        // guard variable in non-local memory
-        {false, "guard_nonlocal"},
-        // guard variable in local memory
-        {true, "guard_local"},
-    };
-
-    static const NamedValue<StorageClass> gscCases[] = {
-        // guard variable in buffer memory
-        {SC_BUFFER, "buffer"},
-        // guard variable in image memory
-        {SC_IMAGE, "image"},
-        // guard variable in physical storage buffer memory
-        {SC_PHYSBUFFER, "physbuffer"},
+    static const NamedValue<bool> cohCases[] = {
+        // coherent payload variable
+        {true, "coherent"},
+        // noncoherent payload variable
+        {false, "noncoherent"},
     };
 
     static const NamedValue<bool> transVisCases[] = {
@@ -239,24 +223,29 @@ tcu::TestCaseGroup *createAvVisChainsTests(tcu::TestContext &testCtx)
         {true, "transvis"},
     };
 
-    de::MovePtr<tcu::TestCaseGroup> transGroup(new tcu::TestCaseGroup(testCtx, "transitive"));
-    for (const auto &[coh, st, pl, psc, gl, gsc, vis] :
-         Combinations(cohCases, stCases, plCases, pscCases, glCases, gscCases, transVisCases))
+    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "transitive"));
+
+    const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
+
+    for (const auto &[local0, sc0, local1, sc1, sync, coh, vis] :
+         Combinations(localCases, scCases, localCases, scCases, syncCases, cohCases, transVisCases))
     {
         CaseDef c = {
-            pl.value,       // bool payloadMemLocal;
-            gl.value,       // bool guardMemLocal;
-            coh.value,      // bool coherent;
-            psc.value,      // StorageClass payloadSC;
-            gsc.value,      // StorageClass guardSC;
-            st.value,       // SyncType syncType;
-            vis.value,      // bool transitiveVis;
+            local0.value, // bool payloadMemLocal;
+            local1.value, // bool guardMemLocal;
+            coh.value,    // bool coherent;
+            vis.value,    // bool transitiveVis;
+            sc0.value,    // StorageClass payloadSC;
+            sc1.value,    // StorageClass guardSC;
+            sync.value,   // SyncType syncType;
         };
-        addTestCase(*transGroup, {coh.name, st.name, pl.name, psc.name, gl.name, gsc.name},
-                    new AvVisChainsTestCase(testCtx, vis.name, c));
+        addTestCase(*group,
+                    {coh.name, sync.name, groupName("payload", local0.name), sc0.name, groupName("guard", local1.name),
+                     sc1.name},
+                    new ChainsWithBarrierTestCase(testCtx, vis.name, c));
     }
 
-    return transGroup.release();
+    return group.release();
 }
 
 } // namespace vkt::MemoryModel

@@ -360,11 +360,11 @@ tcu::TestStatus PaddingTestInstance::iterate(void)
 tcu::TestCaseGroup *createPaddingTests(tcu::TestContext &testCtx)
 {
     // Padding bytes tests
-    de::MovePtr<tcu::TestCaseGroup> paddingGroup(new tcu::TestCaseGroup(testCtx, "padding"));
+    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "padding"));
     // Check padding bytes at the end of structures are not touched on copy
-    paddingGroup->addChild(new PaddingTest(testCtx, "test"));
+    group->addChild(new PaddingTest(testCtx, "test"));
 
-    return paddingGroup.release();
+    return group.release();
 }
 
 } // namespace MemoryModel
