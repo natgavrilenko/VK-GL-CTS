@@ -48,26 +48,19 @@ struct CaseDef
     StorageClass guard2SC;
     Scope nearScope;
     Scope farScope;
+    Stage stage;
 };
 
 std::vector<VarDef> createVars(const CaseDef &data)
 {
-    // The payload needs explicit availability and visibility operations, so it is never coherent
-    const MemQualifier guard1Qualifier = data.guard1SC == SC_IMAGE ? MEM_NONPRIVATE : MEM_NONE;
-    const MemQualifier guard2Qualifier = data.guard2SC == SC_IMAGE ? MEM_NONPRIVATE : MEM_NONE;
     return std::vector<VarDef>{
         {"payload", MEM_NONPRIVATE, data.payloadSC, DATA_TYPE_UINT, data.payloadMemLocal},
-        {"guard1", guard1Qualifier, data.guard1SC, DATA_TYPE_UINT, data.guard1MemLocal},
-        {"guard2", guard2Qualifier, data.guard2SC, DATA_TYPE_UINT, data.guard2MemLocal},
+        {"guard1", MEM_NONE, data.guard1SC, DATA_TYPE_UINT, data.guard1MemLocal},
+        {"guard2", MEM_NONE, data.guard2SC, DATA_TYPE_UINT, data.guard2MemLocal},
         {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true},
     };
 }
 
-// The tests check availability and visibility chains: the payload is made available or visible in two steps at two
-// different scopes. Each chain has three invocations: the first one writes the payload and releases guard1, the second
-// one acquires guard1 and releases guard2, and the third one acquires guard2 and reads the payload. Every invocation
-// plays all three roles, for different indexes: the near partner gives the invocations of the narrow scope step and
-// the far partner the invocations of the wide scope step.
 class ChainsTestCase : public MemoryModelTestCase
 {
 public:
@@ -76,19 +69,13 @@ public:
 
 protected:
     std::string declareSpvIntrinsics() const override;
-
-    // GLSL treats shared variables as workgroupcoherent, which would make every access to a shared payload available
-    // to or visible in the workgroup on its own and hide the chain. A payload in workgroup memory is therefore
-    // accessed with SPIR-V instructions that are only marked non-private. The other storage classes need no
-    // instructions, because GLSL adds nothing to a nonprivate access.
     std::string payloadStore(const char *coord, const char *value) const;
     std::string payloadLoad(const char *coord) const;
-
     const CaseDef m_data;
 };
 
 ChainsTestCase::ChainsTestCase(tcu::TestContext &context, const char *name, const CaseDef &data)
-    : MemoryModelTestCase(context, name, {STAGE_COMPUTE, false}, createVars(data))
+    : MemoryModelTestCase(context, name, {data.stage, false}, createVars(data))
     , m_data(data)
 {
 }
@@ -105,9 +92,7 @@ void ChainsTestCase::checkSupport(Context &context) const
         TCU_THROW(NotSupportedError, "vulkanMemoryModelAvailabilityVisibilityChains not supported");
 
     if (m_data.farScope == SCOPE_DEVICE && !context.getVulkanMemoryModelFeatures().vulkanMemoryModelDeviceScope)
-    {
         TCU_THROW(NotSupportedError, "vulkanMemoryModelDeviceScope not supported");
-    }
 
     if (m_data.nearScope == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context);
@@ -115,6 +100,7 @@ void ChainsTestCase::checkSupport(Context &context) const
     checkSupportVars(context);
     checkSupportVarAtomics(context, "guard1");
     checkSupportVarAtomics(context, "guard2");
+    checkSupportStageAtomics(context);
 }
 
 std::string ChainsTestCase::declareSpvIntrinsics() const
@@ -133,6 +119,7 @@ std::string ChainsTestCase::payloadStore(const char *coord, const char *value) c
     if (m_data.payloadSC != SC_WORKGROUP)
         return gl_store("payload", coord, value);
 
+    // Precise semantics instead of workgroup scope availability by compiler
     return spv_store("payload", coord, value);
 }
 
@@ -141,6 +128,7 @@ std::string ChainsTestCase::payloadLoad(const char *coord) const
     if (m_data.payloadSC != SC_WORKGROUP)
         return gl_load("payload", coord);
 
+    // Precise semantics instead of workgroup scope visibility by compiler
     return spv_load("payload", coord);
 }
 
@@ -168,7 +156,8 @@ std::string AvailabilityChainsAtomicTestCase::initProgram() const
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(nearScope, "Near") << initPartnerCoordinates(farScope, "Far");
+    css << initPartnerCoordinates(nearScope, "Near");
+    css << initPartnerCoordinates(farScope, "Far");
 
     css << "   bool skip1 = false;\n"
         << "   bool skip2 = false;\n"
@@ -203,10 +192,10 @@ private:
 
 std::string AvailabilityChainsFenceTestCase::initProgram() const
 {
-    const Scope nearScope     = m_data.nearScope;
-    const Scope farScope      = m_data.farScope;
     const DataType type       = getVar("payload").type;
     const char *typeStr       = gl_type(type);
+    const Scope nearScope     = m_data.nearScope;
+    const Scope farScope      = m_data.farScope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semGuard1  = getVarSemantics("guard1");
     const uint32_t semGuard2  = getVarSemantics("guard2");
@@ -217,7 +206,8 @@ std::string AvailabilityChainsFenceTestCase::initProgram() const
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(nearScope, "Near") << initPartnerCoordinates(farScope, "Far");
+    css << initPartnerCoordinates(nearScope, "Near");
+    css << initPartnerCoordinates(farScope, "Far");
 
     css << "   bool skip1 = false;\n"
         << "   bool skip2 = false;\n"
@@ -268,7 +258,8 @@ std::string VisibilityChainsAtomicTestCase::initProgram() const
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(nearScope, "Near") << initPartnerCoordinates(farScope, "Far");
+    css << initPartnerCoordinates(nearScope, "Near");
+    css << initPartnerCoordinates(farScope, "Far");
 
     css << "   bool skip1 = false;\n"
         << "   bool skip2 = false;\n"
@@ -317,7 +308,8 @@ std::string VisibilityChainsFenceTestCase::initProgram() const
 
     std::ostringstream css;
 
-    css << initPartnerCoordinates(nearScope, "Near") << initPartnerCoordinates(farScope, "Far");
+    css << initPartnerCoordinates(nearScope, "Near");
+    css << initPartnerCoordinates(farScope, "Far");
 
     css << "   bool skip1 = false;\n"
         << "   bool skip2 = false;\n"
@@ -348,38 +340,34 @@ template <typename VariantTestCase>
 void addChainsTests(tcu::TestCaseGroup &root, const char *variantName, const char *syncName)
 {
     static const NamedValue<StorageClass> scCases[] = {
-        // variable in buffer memory
         {SC_BUFFER, "buffer"},
-        // variable in image memory
         {SC_IMAGE, "image"},
-        // variable in workgroup memory
         {SC_WORKGROUP, "workgroup"},
-        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
     static const NamedValue<bool> localCases[] = {
-        // variable in non-local memory
         {false, "nonlocal"},
-        // variable in local memory
         {true, "local"},
     };
 
     static const NamedValue<Scope> scopeCases[] = {
-        // device scope
         {SCOPE_DEVICE, "device"},
-        // queue family scope
         {SCOPE_QUEUEFAMILY, "queuefamily"},
-        // workgroup scope
         {SCOPE_WORKGROUP, "workgroup"},
-        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
+    };
+
+    static const NamedValue<Stage> stageCases[] = {
+        {STAGE_COMPUTE, "comp"},
+        {STAGE_VERTEX, "vert"},
+        {STAGE_FRAGMENT, "frag"},
     };
 
     const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
 
-    for (const auto &[local0, sc0, local1, sc1, local2, sc2, scope0, scope1] :
-         Combinations(localCases, scCases, localCases, scCases, localCases, scCases, scopeCases, scopeCases))
+    for (const auto &[local0, sc0, local1, sc1, local2, sc2, scope0, scope1, stage] : Combinations(
+             localCases, scCases, localCases, scCases, localCases, scCases, scopeCases, scopeCases, stageCases))
     {
         const CaseDef c = {
             local0.value, // bool payloadMemLocal;
@@ -390,6 +378,7 @@ void addChainsTests(tcu::TestCaseGroup &root, const char *variantName, const cha
             sc2.value,    // StorageClass guard2SC;
             scope0.value, // Scope nearScope;
             scope1.value, // Scope farScope;
+            stage.value,  // Stage stage;
         };
 
         // Near scope must be narrower than far scope, skip queue family nearScope because tests run in the same queue
@@ -398,8 +387,7 @@ void addChainsTests(tcu::TestCaseGroup &root, const char *variantName, const cha
             continue;
         }
 
-        // Skip tests where a variable is in workgroup memory, but its accesses have larger scopes.
-        // Payload crosses both scopes, each guard is shared at the scope of its step.
+        // Skip tests where a variable is in workgroup memory, but its accesses cross larger scopes
         const Scope guard1Scope = VariantTestCase::nearFirst ? c.nearScope : c.farScope;
         const Scope guard2Scope = VariantTestCase::nearFirst ? c.farScope : c.nearScope;
         if ((c.payloadSC == SC_WORKGROUP && c.farScope > SCOPE_WORKGROUP) ||
@@ -416,11 +404,24 @@ void addChainsTests(tcu::TestCaseGroup &root, const char *variantName, const cha
             continue;
         }
 
+        // Skip workgroup scope for non-compute stages
+        if (c.stage != STAGE_COMPUTE && (c.nearScope == SCOPE_WORKGROUP || c.farScope == SCOPE_WORKGROUP))
+        {
+            continue;
+        }
+
+        // Skip workgroup storage class for non-compute stages
+        if (c.stage != STAGE_COMPUTE &&
+            (c.payloadSC == SC_WORKGROUP || c.guard1SC == SC_WORKGROUP || c.guard2SC == SC_WORKGROUP))
+        {
+            continue;
+        }
+
         addTestCase(root,
                     {variantName, syncName, groupName("payload", local0.name), sc0.name,
                      groupName("guard1", local1.name), sc1.name, groupName("guard2", local2.name), sc2.name,
-                     groupName("near", scope0.name)},
-                    new VariantTestCase(root.getTestContext(), groupName("far", scope1.name).c_str(), c));
+                     groupName("near", scope0.name), groupName("far", scope1.name)},
+                    new VariantTestCase(root.getTestContext(), stage.name, c));
     }
 }
 

@@ -52,16 +52,15 @@ struct CaseDef
 
 std::vector<VarDef> createVars(const CaseDef &data)
 {
-    const MemQualifier qualifier = data.core11 ? MEM_COHERENT : scopeToQualifier(data.scope);
-    return std::vector<VarDef>{{"payload", qualifier, data.payloadSC, DATA_TYPE_UINT, data.payloadMemLocal},
-                               {"guard1", qualifier, data.guard1SC, DATA_TYPE_UINT, data.guard1MemLocal},
-                               {"guard2", qualifier, data.guard2SC, DATA_TYPE_UINT, data.guard2MemLocal},
+    const MemQualifier payloadQualifier = data.core11 ? MEM_COHERENT : scopeToQualifier(data.scope);
+    const MemQualifier guard1Qualifier  = (data.core11 && data.guard1SC == SC_IMAGE) ? MEM_COHERENT : MEM_NONE;
+    const MemQualifier guard2Qualifier  = (data.core11 && data.guard2SC == SC_IMAGE) ? MEM_COHERENT : MEM_NONE;
+    return std::vector<VarDef>{{"payload", payloadQualifier, data.payloadSC, DATA_TYPE_UINT, data.payloadMemLocal},
+                               {"guard1", guard1Qualifier, data.guard1SC, DATA_TYPE_UINT, data.guard1MemLocal},
+                               {"guard2", guard2Qualifier, data.guard2SC, DATA_TYPE_UINT, data.guard2MemLocal},
                                {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
-// The tests check that release and acquire semantics are transitive: the payload is released through guard1, the
-// invocation that acquires guard1 releases guard2, and the acquire of guard2 must make the payload visible. Payload,
-// guard1 and guard2 use three different storage classes, and each access names only the payload's class and its own.
 class TransitiveSemanticsTestCase : public MemoryModelTestCase
 {
 public:
@@ -84,8 +83,14 @@ void TransitiveSemanticsTestCase::checkSupport(Context &context) const
     if (!context.contextSupports(vk::ApiVersion(0, 1, 1, 0)))
         TCU_THROW(NotSupportedError, "Vulkan 1.1 not supported");
 
-    if (!m_data.core11 && !context.getVulkanMemoryModelFeatures().vulkanMemoryModel)
-        TCU_THROW(NotSupportedError, "vulkanMemoryModel not supported");
+    if (!m_data.core11)
+    {
+        if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModel)
+            TCU_THROW(NotSupportedError, "vulkanMemoryModel not supported");
+
+        if (m_data.scope == SCOPE_DEVICE && !context.getVulkanMemoryModelFeatures().vulkanMemoryModelDeviceScope)
+            TCU_THROW(NotSupportedError, "vulkanMemoryModelDeviceScope not supported");
+    }
 
     if (m_data.scope == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context, 3);
@@ -95,9 +100,7 @@ void TransitiveSemanticsTestCase::checkSupport(Context &context) const
     checkSupportVarAtomics(context, "guard2");
 }
 
-// Every invocation plays all three roles, for different indexes.
-// The atomic accesses to the guards have the release and acquire semantics.
-class CombinedRolesAtomicTestCase : public TransitiveSemanticsTestCase
+class CombinedAtomicTestCase : public TransitiveSemanticsTestCase
 {
 public:
     using TransitiveSemanticsTestCase::TransitiveSemanticsTestCase;
@@ -106,12 +109,11 @@ private:
     std::string initProgram() const override;
 };
 
-std::string CombinedRolesAtomicTestCase::initProgram() const
+std::string CombinedAtomicTestCase::initProgram() const
 {
-    const Scope scope   = m_data.scope;
-    const DataType type = getVar("payload").type;
-    const char *typeStr = gl_type(type);
-
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
+    const Scope scope         = m_data.scope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semGuard1  = getVarSemantics("guard1");
     const uint32_t semGuard2  = getVarSemantics("guard2");
@@ -143,9 +145,7 @@ std::string CombinedRolesAtomicTestCase::initProgram() const
     return css.str();
 }
 
-// Every invocation plays all three roles, for different indexes.
-// The memory barriers have the release and acquire semantics, the atomic accesses to the guards have none.
-class CombinedRolesFenceTestCase : public TransitiveSemanticsTestCase
+class CombinedFenceTestCase : public TransitiveSemanticsTestCase
 {
 public:
     using TransitiveSemanticsTestCase::TransitiveSemanticsTestCase;
@@ -154,12 +154,11 @@ private:
     std::string initProgram() const override;
 };
 
-std::string CombinedRolesFenceTestCase::initProgram() const
+std::string CombinedFenceTestCase::initProgram() const
 {
-    const Scope scope   = m_data.scope;
-    const DataType type = getVar("payload").type;
-    const char *typeStr = gl_type(type);
-
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
+    const Scope scope         = m_data.scope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semGuard1  = getVarSemantics("guard1");
     const uint32_t semGuard2  = getVarSemantics("guard2");
@@ -197,9 +196,8 @@ std::string CombinedRolesFenceTestCase::initProgram() const
     return css.str();
 }
 
-// Each invocation has a dedicated role within a group.
-// The middle invocation only relays the synchronization, never accessing the payload.
-// The atomic accesses to the guards have the release and acquire semantics.
+// Similar to CombinedAtomicTestCase, except that each invocation has a dedicated role in a group.
+// The middle thread never accesses payload's storage class and its atomics are in different storage classes.
 class RelayAtomicTestCase : public TransitiveSemanticsTestCase
 {
 public:
@@ -211,10 +209,9 @@ private:
 
 std::string RelayAtomicTestCase::initProgram() const
 {
-    const Scope scope   = m_data.scope;
-    const DataType type = getVar("payload").type;
-    const char *typeStr = gl_type(type);
-
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
+    const Scope scope         = m_data.scope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semGuard1  = getVarSemantics("guard1");
     const uint32_t semGuard2  = getVarSemantics("guard2");
@@ -242,6 +239,7 @@ std::string RelayAtomicTestCase::initProgram() const
         << "      if (!skip1) { " << gl_atomicStore("guard2", "guard2CoordPartner1", "1u", scope, semRel2) << "; }\n"
         << "   }\n"
         << "   else {\n"
+        << "      expected += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner1")) << " >> 31;\n"
         << "      skip2 = " << gl_atomicLoad("guard2", "guard2Coord", scope, semAcq2) << " == 0;\n"
         << "      r = " << gl_load("payload", "payloadCoordPartner1") << ";\n"
         << "      if (!idle && !skip2 && r != expected) {\n"
@@ -252,9 +250,8 @@ std::string RelayAtomicTestCase::initProgram() const
     return css.str();
 }
 
-// Each invocation has a dedicated role within a group.
-// The middle invocation only relays the synchronization, never accessing the payload.
-// The memory barriers have the release and acquire semantics, the atomic accesses to the guards have none.
+// Similar to CombinedFenceTestCase, except that each invocation has a dedicated role in a group.
+// The middle thread never accesses payload's storage class and its atomics are in different storage classes.
 class RelayFenceTestCase : public TransitiveSemanticsTestCase
 {
 public:
@@ -266,10 +263,9 @@ private:
 
 std::string RelayFenceTestCase::initProgram() const
 {
-    const Scope scope   = m_data.scope;
-    const DataType type = getVar("payload").type;
-    const char *typeStr = gl_type(type);
-
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
+    const Scope scope         = m_data.scope;
     const uint32_t semPayload = getVarSemantics("payload");
     const uint32_t semGuard1  = getVarSemantics("guard1");
     const uint32_t semGuard2  = getVarSemantics("guard2");
@@ -302,6 +298,7 @@ std::string RelayFenceTestCase::initProgram() const
         << "      }\n"
         << "   }\n"
         << "   else {\n"
+        << "      expected += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner1")) << " >> 31;\n"
         << "      skip2 = " << gl_atomicLoad("guard2", "guard2Coord", scope, 0) << " == 0;\n"
         << "      " << gl_memoryBarrier(scope, semAcq2) << ";\n"
         << "      r = " << gl_load("payload", "payloadCoordPartner1") << ";\n"
@@ -314,39 +311,29 @@ std::string RelayFenceTestCase::initProgram() const
 }
 
 template <typename VariantTestCase>
-void addTransitiveSemanticsTests(tcu::TestCaseGroup &root, const char *variantName, const char *syncName,
-                                 bool hasCore11)
+void addTransitiveSemanticsTests(tcu::TestCaseGroup &root, const char *variantName, const char *syncName)
 {
     static const NamedValue<bool> core11Cases[] = {
-        // supported by Vulkan1.1
-        {true, "core11"},
-        // requires VK_KHR_vulkan_memory_model extension
-        {false, "ext"},
+        {true, "core11"}, // supported by Vulkan 1.1
+        {false, "ext"},   // requires Vulkan memory model
     };
 
     static const NamedValue<StorageClass> scCases[] = {
-        // variable in buffer memory
         {SC_BUFFER, "buffer"},
-        // variable in image memory
         {SC_IMAGE, "image"},
-        // variable in workgroup memory
         {SC_WORKGROUP, "workgroup"},
-        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
     static const NamedValue<bool> localCases[] = {
-        // variable in non-local memory
         {false, "nonlocal"},
-        // variable in local memory
         {true, "local"},
     };
 
-    // Omit SCOPE_QUEUEFAMILY and SCOPE_DEVICE because all tests use workgroup memory
     static const NamedValue<Scope> scopeCases[] = {
-        // workgroup scope
+        {SCOPE_DEVICE, "device"},
+        {SCOPE_QUEUEFAMILY, "queuefamily"},
         {SCOPE_WORKGROUP, "workgroup"},
-        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
@@ -366,17 +353,18 @@ void addTransitiveSemanticsTests(tcu::TestCaseGroup &root, const char *variantNa
             scope.value,  // Scope scope;
         };
 
-        // Mustpass11 tests should only exercise variations that are expected to work without Vulkan memory model.
-        // Exclude release-acquire atomics. Exclude physical storage buffer which doesn't support coherent decoration.
-        if (c.core11 &&
-            (!hasCore11 || c.payloadSC == SC_PHYSBUFFER || c.guard1SC == SC_PHYSBUFFER || c.guard2SC == SC_PHYSBUFFER))
+        // Tests in core11 include only variations that do not require Vulkan memory model. Skip release-acquire
+        // atomics. Skip queue family scope which doesn't exist in Vulkan 1.1. Skip physical storage buffer which
+        // doesn't support coherent decoration.
+        if (c.core11 && (std::string(syncName) == "atomic" || c.scope == SCOPE_QUEUEFAMILY ||
+                         c.payloadSC == SC_PHYSBUFFER || c.guard1SC == SC_PHYSBUFFER || c.guard2SC == SC_PHYSBUFFER))
         {
             continue;
         }
 
-        // Payload, guard1 and guard2 use storage classes with different storage class semantics
-        if (scToSem(c.guard1SC) == scToSem(c.payloadSC) || scToSem(c.guard2SC) == scToSem(c.payloadSC) ||
-            scToSem(c.guard2SC) == scToSem(c.guard1SC))
+        // Skip tests where a variable is in workgroup memory, but its accesses cross larger scopes
+        if (c.scope > SCOPE_WORKGROUP &&
+            (c.payloadSC == SC_WORKGROUP || c.guard1SC == SC_WORKGROUP || c.guard2SC == SC_WORKGROUP))
         {
             continue;
         }
@@ -384,6 +372,20 @@ void addTransitiveSemanticsTests(tcu::TestCaseGroup &root, const char *variantNa
         // Workgroup memory is only tested as non-local
         if ((c.payloadMemLocal && c.payloadSC == SC_WORKGROUP) || (c.guard1MemLocal && c.guard1SC == SC_WORKGROUP) ||
             (c.guard2MemLocal && c.guard2SC == SC_WORKGROUP))
+        {
+            continue;
+        }
+
+        // Limit workgroup and subgroup scoped tests to variations with different semantics for each variable
+        if (c.scope <= SCOPE_WORKGROUP &&
+            (scToSem(c.guard1SC) == scToSem(c.payloadSC) || scToSem(c.guard2SC) == scToSem(c.payloadSC) ||
+             scToSem(c.guard2SC) == scToSem(c.guard1SC)))
+        {
+            continue;
+        }
+
+        // Relay tests require a variable in workgroup memory, so restrict them to subgroup and workgroup scopes
+        if (std::string(variantName) == "relay" && c.scope > SCOPE_WORKGROUP)
         {
             continue;
         }
@@ -401,12 +403,10 @@ tcu::TestCaseGroup *createTransitiveSemanticsTests(tcu::TestContext &testCtx)
 {
     de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "transitive_semantics"));
 
-    // Only the fence tests have core11 variations: without the Vulkan memory model, atomic synchronization is not
-    // expected to work (i.e. atomics may be implemented as relaxed atomics)
-    addTransitiveSemanticsTests<CombinedRolesAtomicTestCase>(*group, "combined", "atomic", false);
-    addTransitiveSemanticsTests<CombinedRolesFenceTestCase>(*group, "combined", "fence", true);
-    addTransitiveSemanticsTests<RelayAtomicTestCase>(*group, "relay", "atomic", false);
-    addTransitiveSemanticsTests<RelayFenceTestCase>(*group, "relay", "fence", true);
+    addTransitiveSemanticsTests<CombinedAtomicTestCase>(*group, "combined", "atomic");
+    addTransitiveSemanticsTests<CombinedFenceTestCase>(*group, "combined", "fence");
+    addTransitiveSemanticsTests<RelayAtomicTestCase>(*group, "relay", "atomic");
+    addTransitiveSemanticsTests<RelayFenceTestCase>(*group, "relay", "fence");
 
     return group.release();
 }

@@ -61,25 +61,17 @@ MemQualifier getMemQualifier(const CaseDef &data)
 
 Scope getMappingScope(const CaseDef &data)
 {
-    const bool hasSharedVar = data.payloadSC == SC_WORKGROUP;
-    if ((data.syncScope == SCOPE_DEVICE || data.syncScope == SCOPE_QUEUEFAMILY) && hasSharedVar)
+    if ((data.payloadSC == SC_WORKGROUP) && (data.syncScope > SCOPE_WORKGROUP))
     {
         return SCOPE_WORKGROUP;
     }
     return data.syncScope;
 }
 
-// Memory qualifiers cannot be used on workgroup memory, so with the Vulkan memory model its non-atomic loads
-// get their memory access operands (NonPrivatePointer, MakePointerVisible) from a SPIR-V intrinsic
-bool usesLoadIntrinsic(const CaseDef &data)
-{
-    return !data.core11 && data.payloadSC == SC_WORKGROUP;
-}
-
 std::vector<VarDef> createVars(const CaseDef &data)
 {
-    const MemQualifier payloadQualifier = getMemQualifier(data);
-    return std::vector<VarDef>{{"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal},
+    const MemQualifier qualifier = getMemQualifier(data);
+    return std::vector<VarDef>{{"payload", qualifier, data.payloadSC, data.dataType, data.payloadMemLocal},
                                {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true}};
 }
 
@@ -91,6 +83,7 @@ public:
 
 private:
     std::string declareSpvIntrinsics() const override;
+    std::string payloadLoad(const char *coord) const;
     std::string initProgram() const override;
     const CaseDef m_data;
 };
@@ -128,33 +121,33 @@ void MixedAccessTestCase::checkSupport(Context &context) const
 
 std::string MixedAccessTestCase::declareSpvIntrinsics() const
 {
-    if (!usesLoadIntrinsic(m_data))
+    if (m_data.core11 || m_data.payloadSC != SC_WORKGROUP)
         return {};
 
     std::ostringstream css;
-    css << "#extension GL_EXT_spirv_intrinsics : enable\n"
-        << declareVarSpvIntrinsics("payload", m_data.visScope == SCOPE_DEVICE);
+    css << "#extension GL_EXT_spirv_intrinsics : enable\n";
+    css << declareVarSpvIntrinsics("payload", m_data.visScope == SCOPE_DEVICE);
     return css.str();
+}
+
+// By default, compiler sets workgroup scope visibility for shared memory variables.
+// Force precise semantics with SPIR-V intrinsics.
+std::string MixedAccessTestCase::payloadLoad(const char *coord) const
+{
+    if (m_data.core11 || m_data.payloadSC != SC_WORKGROUP)
+        return gl_load("payload", coord);
+
+    if (!m_data.visScope.has_value())
+        return spv_load("payload", coord);
+
+    return spv_load("payload", coord, *m_data.visScope);
 }
 
 std::string MixedAccessTestCase::initProgram() const
 {
-    const Scope syncScope = m_data.syncScope;
     const DataType type   = getVar("payload").type;
     const char *typeStr   = gl_type(type);
-
-    std::string loadPayload;
-    if (usesLoadIntrinsic(m_data))
-    {
-        if (m_data.visScope.has_value())
-            loadPayload = spv_load("payload", "payloadCoordPartner", *m_data.visScope);
-        else
-            loadPayload = spv_load("payload", "payloadCoordPartner");
-    }
-    else
-    {
-        loadPayload = gl_load("payload", "payloadCoordPartner");
-    }
+    const Scope syncScope = m_data.syncScope;
 
     std::ostringstream css;
 
@@ -163,13 +156,11 @@ std::string MixedAccessTestCase::initProgram() const
     css << "   uint value = invocationId;\n"
         << "   " << typeStr << " r1 = 0;\n"
         << "   " << typeStr << " r2 = 0;\n"
-        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n";
-
-    // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
-    css << "   value += " << gl_toUint(type, loadPayload) << " >> 31;\n"
+        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n"
+        << "   value += " << gl_toUint(type, payloadLoad("payloadCoordPartner")) << " >> 31;\n"
         << "   " << gl_atomicStore("payload", "payloadCoord", "value", syncScope, 0) << ";\n"
         << "   r1 = " << gl_atomicLoad("payload", "payloadCoordPartner", syncScope, 0) << ";\n"
-        << "   r2 = " << loadPayload << ";\n"
+        << "   r2 = " << payloadLoad("payloadCoordPartner") << ";\n"
         << "   if (!idle && r1 == expected && r2 != expected) {\n"
         << "      " << gl_store("fail", "failCoord", "1") << ";\n"
         << "   }\n";
@@ -182,71 +173,47 @@ std::string MixedAccessTestCase::initProgram() const
 tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
 {
     static const NamedValue<bool> core11Cases[] = {
-        // supported by Vulkan1.1
-        {true, "core11"},
-        // requires VK_KHR_vulkan_memory_model extension
-        {false, "ext"},
+        {true, "core11"}, // supported by Vulkan 1.1
+        {false, "ext"},   // requires Vulkan memory model
     };
 
     static const NamedValue<DataType> typeCases[] = {
-        // uint32_t atomics
         {DATA_TYPE_UINT, "u32"},
-        // uint64_t atomics
         {DATA_TYPE_UINT64, "u64"},
-        // float32 atomics
         {DATA_TYPE_FLOAT32, "f32"},
-        // float64 atomics
         {DATA_TYPE_FLOAT64, "f64"},
     };
 
     static const NamedValue<StorageClass> scCases[] = {
-        // variable in buffer memory
         {SC_BUFFER, "buffer"},
-        // variable in image memory
         {SC_IMAGE, "image"},
-        // variable in workgroup memory
         {SC_WORKGROUP, "workgroup"},
-        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
     static const NamedValue<bool> localCases[] = {
-        // variable in non-local memory
         {false, "nonlocal"},
-        // variable in local memory
         {true, "local"},
     };
 
     static const NamedValue<Scope> syncScopeCases[] = {
-        // device scope
         {SCOPE_DEVICE, "device"},
-        // queue family scope
         {SCOPE_QUEUEFAMILY, "queuefamily"},
-        // workgroup scope
         {SCOPE_WORKGROUP, "workgroup"},
-        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
     static const NamedValue<std::optional<Scope>> visScopeCases[] = {
-        // no visibility scope
         {std::nullopt, "nonprivate"},
-        // subgroup scope visibility
         {SCOPE_SUBGROUP, "vissubgroup"},
-        // workgroup scope visibility
         {SCOPE_WORKGROUP, "visworkgroup"},
-        // queue family scope visibility
         {SCOPE_QUEUEFAMILY, "visqueuefamily"},
-        // device scope visibility
         {SCOPE_DEVICE, "visdevice"},
     };
 
     static const NamedValue<Stage> stageCases[] = {
-        // compute stage
         {STAGE_COMPUTE, "comp"},
-        // vertex stage
         {STAGE_VERTEX, "vert"},
-        // fragment stage
         {STAGE_FRAGMENT, "frag"},
     };
 
@@ -257,7 +224,7 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
     for (const auto &[core11, type, local, sc, syncScope, visScope, stage] :
          Combinations(core11Cases, typeCases, localCases, scCases, syncScopeCases, visScopeCases, stageCases))
     {
-        CaseDef c = {
+        const CaseDef c = {
             core11.value,    // bool core11;
             local.value,     // bool payloadMemLocal;
             type.value,      // DataType dataType;
@@ -267,30 +234,35 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
             stage.value,     // Stage stage;
         };
 
-        // Mustpass11 tests should only exercise variations that are expected to work without Vulkan memory model.
-        // Exclude explicit visibility scope, which requires Vulkan memory model. Exclude queue family scope which
-        // doesn't exist in Vulkan 1.1. Exclude physical storage buffer which doesn't support coherent decoration.
+        // Tests in core11 include only variations that do not require Vulkan memory model. Skip explicit visibility
+        // scope. Skip queue family scope which doesn't exist in Vulkan 1.1. Skip physical storage buffer which doesn't
+        // support coherent decoration.
         if (c.core11 && (c.visScope || c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64 ||
                          c.syncScope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER))
         {
             continue;
         }
 
-        // Don't exercise workgroup memory for non-compute stages
-        if (c.stage != STAGE_COMPUTE &&
-            (c.syncScope == SCOPE_WORKGROUP || c.payloadSC == SC_WORKGROUP || c.visScope == SCOPE_WORKGROUP))
+        // Workgroup memory is only tested as non-local
+        if (c.payloadSC == SC_WORKGROUP && c.payloadMemLocal)
         {
             continue;
         }
 
-        // Don't exercise local and non-local for workgroup memory
-        if (c.payloadSC == SC_WORKGROUP && c.payloadMemLocal != 0)
+        // Skip workgroup scope for non-compute stages
+        if (c.stage != STAGE_COMPUTE && (c.syncScope == SCOPE_WORKGROUP || c.visScope == SCOPE_WORKGROUP))
         {
             continue;
         }
 
-        // No 64-bit image types, so skip tests for 64-bit types
-        if (c.payloadSC == SC_IMAGE && (c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64))
+        // Skip workgroup storage class for non-compute stages
+        if (c.stage != STAGE_COMPUTE && c.payloadSC == SC_WORKGROUP)
+        {
+            continue;
+        }
+
+        // No 64-bit image types, so skip tests with payload in image memory
+        if (c.payloadSC == SC_IMAGE && is64BitType(c.dataType))
         {
             continue;
         }

@@ -193,9 +193,7 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
 
     css << "#version 450 core\n";
     if (!m_params.core11)
-    {
         css << "#pragma use_vulkan_memory_model\n";
-    }
     css << "#extension GL_EXT_shader_atomic_float : enable\n"
            "#extension GL_EXT_split_barrier : enable\n"
            "#extension GL_KHR_shader_subgroup_basic : enable\n"
@@ -218,58 +216,12 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
     css << declareSharedVars();
 
     if (m_params.stage == STAGE_COMPUTE)
-    {
         css << "layout(local_size_x_id = 0, local_size_y_id = 0, local_size_z = 1) in;\n";
-    }
 
-    // Declare layout and collect push constant block for physical storage buffer
-    std::ostringstream pcs;
-    for (size_t i = 0; i < m_vars.size(); i++)
-    {
-        const auto &var  = m_vars[i];
-        const char *name = var.name;
+    css << declareVars();
 
-        switch (var.sc)
-        {
-        case SC_PHYSBUFFER:
-        {
-            const char *ref = var.qual == MEM_NONE ? "" : "ref";
-            css << "layout(buffer_reference) buffer T" << name << "Ref { " << gl_type(var.type) << " x[]; };\n";
-            pcs << "layout(offset = " << (i * DEVICE_ADDRESS_SIZE) << ") T" << name << "Ref " << name << ref << ";\n";
-            break;
-        }
-        case SC_BUFFER:
-        {
-            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(var.qual) << " buffer T" << name << " { "
-                << gl_type(var.type) << " x[]; } " << name << ";\n";
-            break;
-        }
-        case SC_IMAGE:
-        {
-            const char *type1 = isIntType(var.type) ? "r32ui" : "r32f";
-            const char *type2 = isIntType(var.type) ? "uimage2D" : "image2D";
-            css << "layout(set=0, binding=" << i << ", " << type1 << ") uniform " << gl_qualifier(var.qual) << " "
-                << type2 << " " << name << ";\n";
-            break;
-        }
-        case SC_WORKGROUP:
-        {
-            css << "struct S" << name << " { " << gl_type(var.type) << " x[DIM*DIM]; };\n"
-                << "shared S" << name << " " << name << ";\n";
-            break;
-        }
-        default:
-            DE_ASSERT(0);
-        }
-    }
-
-    if (hasStorageClass(SC_PHYSBUFFER))
-    {
-        css << "layout (push_constant, std430) uniform PC {\n" << pcs.str() << "};\n";
-    }
-
-    // Declare functions to compute invocation ID and coordinates, increment invocationIds by one
-    // to avoid collisions with initial zero
+    // Declare functions to compute invocation ID and coordinates
+    // Increments invocationIds by one to avoid collisions with initial zero
     css << "uint getInvocationId(ivec2 pos) { return uint(pos.y * gridDim + pos.x) + 1u; }\n"
         << "uint getSharedCoord(ivec2 pos) { return uint((pos.y % DIM) * DIM + pos.x % DIM); }\n"
         << "uint getBufferCoord(ivec2 pos) { return uint((pos.y / DIM * NUM_WORKGROUP_EACH_DIM + pos.x / DIM) * "
@@ -329,7 +281,7 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
     css << "}\n";
 
     // Build shaders
-    const vk::ShaderBuildOptions buildOptions(programCollection.usedVulkanVersion, vk::SPIRV_VERSION_1_3, 0u);
+    const ShaderBuildOptions buildOptions(programCollection.usedVulkanVersion, SPIRV_VERSION_1_3, 0u);
     programCollection.glslSources.add("test")
         << glu::ShaderSource(getShaderType(m_params.stage), css.str()) << buildOptions;
 
@@ -343,6 +295,56 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
     }
 }
 
+std::string MemoryModelTestCase::declareVars() const
+{
+    std::ostringstream css;
+    std::ostringstream pcs;
+
+    for (size_t i = 0; i < m_vars.size(); i++)
+    {
+        const auto &var  = m_vars[i];
+        const char *name = var.name;
+
+        switch (var.sc)
+        {
+        case SC_PHYSBUFFER:
+        {
+            const char *ref = var.qual == MEM_NONE ? "" : "ref";
+            css << "layout(buffer_reference) buffer T" << name << "Ref { " << gl_type(var.type) << " x[]; };\n";
+            pcs << "layout(offset = " << (i * DEVICE_ADDRESS_SIZE) << ") T" << name << "Ref " << name << ref << ";\n";
+            break;
+        }
+        case SC_BUFFER:
+        {
+            css << "layout(set=0, binding=" << i << ") " << gl_qualifier(var.qual) << " buffer T" << name << " { "
+                << gl_type(var.type) << " x[]; } " << name << ";\n";
+            break;
+        }
+        case SC_IMAGE:
+        {
+            const char *type1 = isIntType(var.type) ? "r32ui" : "r32f";
+            const char *type2 = isIntType(var.type) ? "uimage2D" : "image2D";
+            css << "layout(set=0, binding=" << i << ", " << type1 << ") uniform " << gl_qualifier(var.qual) << " "
+                << type2 << " " << name << ";\n";
+            break;
+        }
+        case SC_WORKGROUP:
+        {
+            css << "struct S" << name << " { " << gl_type(var.type) << " x[DIM*DIM]; };\n"
+                << "shared S" << name << " " << name << ";\n";
+            break;
+        }
+        default:
+            DE_ASSERT(0);
+        }
+    }
+
+    if (hasStorageClass(SC_PHYSBUFFER))
+        css << "layout (push_constant, std430) uniform PC {\n" << pcs.str() << "};\n";
+
+    return css.str();
+}
+
 std::string MemoryModelTestCase::declareVarSpvIntrinsics(const char *name, const bool hasDeviceScope) const
 {
     DE_ASSERT(!m_params.core11);
@@ -352,7 +354,7 @@ std::string MemoryModelTestCase::declareVarSpvIntrinsics(const char *name, const
 
     const char *typeStr = gl_type(var.type);
 
-    std::string capabilities =
+    const std::string capabilities =
         hasDeviceScope ? "capabilities = [" + std::to_string(SPV_CAPABILITY_DEVICE_SCOPE) + "], " : "";
 
     std::ostringstream css;
@@ -399,15 +401,16 @@ std::string MemoryModelTestCase::initPartners(const Scope scope, const uint32_t 
     // Group size is the number of partners plus the invocation itself
     const uint32_t groupSize = numPartners + 1;
 
-    // Partners are taken from a block of invocations given by the scope: blockSize is the number of invocations
-    // in the block, blockIndex the index of this invocation in it, and blockPos the position of a given index
+    // Partners are taken from a block of invocations given by the scope
+    // blockSize is the number of invocations in the block
+    // blockIndex is the index of this invocation in the block
+    // blockPos is the position of a given index in the block
     const char *blockSize                             = nullptr;
     const char *blockIndex                            = nullptr;
     std::string (*blockPos)(const std::string &index) = nullptr;
 
-    // Mirroring fragments over the whole grid would put the partners of nearly every pair into different triangles
-    // of the fullscreen strip, where they are unlikely to be shaded concurrently. Fragment shaders therefore take
-    // their queue family and device scope partners from the DIM x DIM tile, as for a workgroup.
+    // Unlike compute and vertex shaders, fragment shaders take their queue family and device scope partners from the
+    // DIM x DIM tile instead of the whole grid, so that partners are likely in the same triangle and run concurrently.
     const bool isTileBlock = (m_params.stage == STAGE_FRAGMENT && scope != SCOPE_SUBGROUP);
     const Scope blockScope = isTileBlock ? SCOPE_WORKGROUP : scope;
 
@@ -969,7 +972,6 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
             break;
         }
         case SC_WORKGROUP:
-            // Workgroup memory is declared in the shader and needs no resource
             break;
         default:
             DE_ASSERT(0);
@@ -1015,8 +1017,8 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     }
     setUpdateBuilder.update(vk, device);
 
-    // Physical storage buffer addresses are push constants, at an offset given by the variable index.
-    // The result buffer is never a physical storage buffer, so the range ends before it.
+    // Physical storage buffer addresses are push constants at an offset given by the variable index
+    // The result buffer is never a physical storage buffer, so the range ends before it
     const VkPushConstantRange pushConstRange = {shaderStageFlags, 0, idxResultVar * DEVICE_ADDRESS_SIZE};
     const bool hasPhysBuffers =
         std::any_of(m_vars.begin(), m_vars.end(), [](const VarDef &b) { return b.sc == SC_PHYSBUFFER; });
@@ -1046,8 +1048,8 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     }
     else
     {
-        // Vertex tests run "test" as the only shader stage, fragment tests pair it with the fullscreen "vert" shader.
-        // Without a fragment stage, makeGraphicsPipeline disables rasterization.
+        // Vertex tests run "test" as the only shader stage, fragment tests pair it with the fullscreen "vert" shader
+        // Without a fragment stage, makeGraphicsPipeline disables rasterization
         const bool isVertexStage = (m_stage == STAGE_VERTEX);
         const Unique<VkShaderModule> vertexShader(
             createShaderModule(vk, device, m_context.getBinaryCollection().get(isVertexStage ? "test" : "vert"), 0));
@@ -1080,8 +1082,8 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
     const Unique<VkCommandBuffer> cmdBuffer(
         allocateCommandBuffer(vk, device, *cmdPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY));
 
-    // Initialize the buffer the CPU will read from.
-    // Try to use cached host memory, fallback to host visible memory.
+    // Initialize the buffer the CPU will read from
+    // Try to use cached host memory, fallback to host visible memory
     de::MovePtr<BufferWithMemory> copyBuffer;
     const size_t sizeCopyBuffer = sizeof(uint32_t) * NUM_INVOCATIONS;
     try
