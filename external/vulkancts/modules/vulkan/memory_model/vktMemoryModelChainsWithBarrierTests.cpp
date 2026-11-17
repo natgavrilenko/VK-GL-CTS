@@ -53,7 +53,6 @@ struct CaseDef
     bool payloadMemLocal;
     bool guardMemLocal;
     bool coherent;
-    bool transitiveVis;
     StorageClass payloadSC;
     StorageClass guardSC;
     SyncType syncType;
@@ -61,11 +60,10 @@ struct CaseDef
 
 std::vector<VarDef> createVars(const CaseDef &data)
 {
-    const MemQualifier payloadQualifier = data.coherent ? MEM_WORKGROUP : MEM_NONPRIVATE;
-    const MemQualifier guardQualifier   = data.guardSC == SC_IMAGE ? payloadQualifier : MEM_NONE;
+    const MemQualifier qualifier = data.coherent ? MEM_WORKGROUP : MEM_NONPRIVATE;
     return std::vector<VarDef>{
-        {"payload", payloadQualifier, data.payloadSC, DATA_TYPE_UINT, data.payloadMemLocal},
-        {"guard", guardQualifier, data.guardSC, DATA_TYPE_UINT, data.guardMemLocal},
+        {"payload", qualifier, data.payloadSC, DATA_TYPE_UINT, data.payloadMemLocal},
+        {"guard", MEM_NONE, data.guardSC, DATA_TYPE_UINT, data.guardMemLocal},
         {"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true},
     };
 }
@@ -76,9 +74,7 @@ public:
     ChainsWithBarrierTestCase(tcu::TestContext &context, const char *name, const CaseDef &data);
     void checkSupport(Context &context) const override;
 
-private:
-    std::string declareSharedVars() const override;
-    std::string initProgram() const override;
+protected:
     const CaseDef m_data;
 };
 
@@ -96,28 +92,92 @@ void ChainsWithBarrierTestCase::checkSupport(Context &context) const
     if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModel)
         TCU_THROW(NotSupportedError, "vulkanMemoryModel not supported");
 
-    if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModelDeviceScope)
-        TCU_THROW(NotSupportedError, "vulkanMemoryModelDeviceScope not supported");
-
     if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModelAvailabilityVisibilityChains)
         TCU_THROW(NotSupportedError, "vulkanMemoryModelAvailabilityVisibilityChains not supported");
+
+    if (!context.getVulkanMemoryModelFeatures().vulkanMemoryModelDeviceScope)
+        TCU_THROW(NotSupportedError, "vulkanMemoryModelDeviceScope not supported");
 
     checkSupportVars(context);
     checkSupportVarAtomics(context, "guard");
 }
 
-std::string ChainsWithBarrierTestCase::declareSharedVars() const
+class AvailabilityChainsTestCase : public ChainsWithBarrierTestCase
 {
-    if (m_data.transitiveVis)
-        return std::string{"shared bool sharedSkip;\n"};
-    return {};
+public:
+    using ChainsWithBarrierTestCase::ChainsWithBarrierTestCase;
+
+private:
+    std::string initProgram() const override;
+};
+
+std::string AvailabilityChainsTestCase::initProgram() const
+{
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
+    const uint32_t semAv      = m_data.coherent ? 0u : uint32_t(SEM_AVAILABLE);
+    const uint32_t semPayload = getVarSemantics("payload");
+    const uint32_t semGuard   = getVarSemantics("guard");
+    const uint32_t semRel     = SEM_RELEASE | semPayload | SEM_AVAILABLE;
+    const uint32_t semAcq     = SEM_ACQUIRE | semPayload | SEM_VISIBLE;
+    const uint32_t semAcqRel  = SEM_ACQUIRE_RELEASE | semPayload;
+
+    std::ostringstream css;
+
+    css << initPartnerCoordinates(SCOPE_DEVICE);
+    css << "   ivec2 groupPosPartner = posPartner - posPartner % DIM;\n"
+        << initVarCoordinates("groupPosPartner", "GroupCoordPartner");
+
+    css << "   bool skip = false;\n"
+        << "   uint value = invocationId;\n"
+        << "   " << typeStr << " r = 0;\n"
+        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n"
+        << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner")) << " >> 31;\n"
+        << "   " << gl_store("payload", "payloadCoord", "value") << ";\n"
+        << "   " << gl_controlBarrier(SCOPE_WORKGROUP, SCOPE_WORKGROUP, semAcqRel | semAv) << ";\n"
+        << "   if (all(equal(gl_LocalInvocationID.xy, ivec2(0,0)))) {\n";
+
+    if (m_data.syncType == ST_ATOMIC_ATOMIC || m_data.syncType == ST_ATOMIC_FENCE)
+        css << "      " << gl_atomicStore("guard", "guardCoord", "1u", SCOPE_DEVICE, semRel) << ";\n";
+    else
+        css << "      " << gl_memoryBarrier(SCOPE_DEVICE, semRel | semGuard) << ";\n"
+            << "      " << gl_atomicStore("guard", "guardCoord", "1u", SCOPE_DEVICE, 0) << ";\n";
+
+    css << "   }\n";
+
+    if (m_data.syncType == ST_ATOMIC_ATOMIC || m_data.syncType == ST_FENCE_ATOMIC)
+        css << "   skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, semAcq) << " == 0;\n";
+    else
+        css << "   skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, 0) << " == 0;\n"
+            << "   " << gl_memoryBarrier(SCOPE_DEVICE, semAcq | semGuard) << ";\n";
+
+    css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
+        << "   if (!idle && !skip && r != expected) {\n"
+        << "      " << gl_store("fail", "failCoord", "1") << ";\n"
+        << "   }\n";
+
+    return css.str();
 }
 
-std::string ChainsWithBarrierTestCase::initProgram() const
+class AvailabilityVisibilityChainsTestCase : public ChainsWithBarrierTestCase
 {
-    const DataType type = getVar("payload").type;
-    const char *typeStr = gl_type(type);
+public:
+    using ChainsWithBarrierTestCase::ChainsWithBarrierTestCase;
 
+private:
+    std::string declareSharedVars() const override;
+    std::string initProgram() const override;
+};
+
+std::string AvailabilityVisibilityChainsTestCase::declareSharedVars() const
+{
+    return std::string{"shared bool sharedSkip;\n"};
+}
+
+std::string AvailabilityVisibilityChainsTestCase::initProgram() const
+{
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
     const uint32_t semAv      = m_data.coherent ? 0u : uint32_t(SEM_AVAILABLE);
     const uint32_t semVis     = m_data.coherent ? 0u : uint32_t(SEM_VISIBLE);
     const uint32_t semPayload = getVarSemantics("payload");
@@ -129,48 +189,36 @@ std::string ChainsWithBarrierTestCase::initProgram() const
     std::ostringstream css;
 
     css << initPartnerCoordinates(SCOPE_DEVICE);
-
     css << "   ivec2 groupPosPartner = posPartner - posPartner % DIM;\n"
         << initVarCoordinates("groupPosPartner", "GroupCoordPartner");
 
     css << "   bool skip = false;\n"
         << "   uint value = invocationId;\n"
         << "   " << typeStr << " r = 0;\n"
-        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n";
-
-    // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
-    css << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner")) << " >> 31;\n"
+        << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartner);\n"
+        << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner")) << " >> 31;\n"
         << "   " << gl_store("payload", "payloadCoord", "value") << ";\n"
         << "   " << gl_controlBarrier(SCOPE_WORKGROUP, SCOPE_WORKGROUP, semAcqRel | semAv) << ";\n"
         << "   if (all(equal(gl_LocalInvocationID.xy, ivec2(0,0)))) {\n";
 
     if (m_data.syncType == ST_ATOMIC_ATOMIC || m_data.syncType == ST_ATOMIC_FENCE)
-        css << "       " << gl_atomicStore("guard", "guardCoord", "1u", SCOPE_DEVICE, semRel) << ";\n";
+        css << "      " << gl_atomicStore("guard", "guardCoord", "1u", SCOPE_DEVICE, semRel) << ";\n";
     else
-        css << "       " << gl_memoryBarrier(SCOPE_DEVICE, semRel | semGuard) << ";\n"
-            << "       " << gl_atomicStore("guard", "guardCoord", "1u", SCOPE_DEVICE, 0) << ";\n";
-
-    if (!m_data.transitiveVis)
-    {
-        css << "   }\n";
-    }
+        css << "      " << gl_memoryBarrier(SCOPE_DEVICE, semRel | semGuard) << ";\n"
+            << "      " << gl_atomicStore("guard", "guardCoord", "1u", SCOPE_DEVICE, 0) << ";\n";
 
     if (m_data.syncType == ST_ATOMIC_ATOMIC || m_data.syncType == ST_FENCE_ATOMIC)
-        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, semAcq) << " == 0;\n";
+        css << "      skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, semAcq) << " == 0;\n";
     else
-        css << "       skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, 0) << " == 0;\n"
-            << "       " << gl_memoryBarrier(SCOPE_DEVICE, semAcq | semGuard) << ";\n";
+        css << "      skip = " << gl_atomicLoad("guard", "guardGroupCoordPartner", SCOPE_DEVICE, 0) << " == 0;\n"
+            << "      " << gl_memoryBarrier(SCOPE_DEVICE, semAcq | semGuard) << ";\n";
 
-    if (m_data.transitiveVis)
-    {
-        // SEM_SHARED semantics in the control barrier orders accesses to sharedSkip
-        css << "       sharedSkip = skip;\n"
-            << "   }\n"
-            << "   " << gl_controlBarrier(SCOPE_WORKGROUP, SCOPE_WORKGROUP, SEM_SHARED | semAcqRel | semVis) << ";\n"
-            << "   skip = sharedSkip;\n";
-    }
-
-    css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
+    // SEM_SHARED in gl_controlBarrier orders accesses to sharedSkip
+    css << "      sharedSkip = skip;\n"
+        << "   }\n"
+        << "   " << gl_controlBarrier(SCOPE_WORKGROUP, SCOPE_WORKGROUP, SEM_SHARED | semAcqRel | semVis) << ";\n"
+        << "   skip = sharedSkip;\n"
+        << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n"
         << "   if (!idle && !skip && r != expected) {\n"
         << "      " << gl_store("fail", "failCoord", "1") << ";\n"
         << "   }\n";
@@ -178,72 +226,61 @@ std::string ChainsWithBarrierTestCase::initProgram() const
     return css.str();
 }
 
-} // namespace
-
-tcu::TestCaseGroup *createChainsWithBarrierTests(tcu::TestContext &testCtx)
+template <typename VariantTestCase>
+void addChainsWithBarrierTests(tcu::TestCaseGroup &root, const char *variantName)
 {
     static const NamedValue<StorageClass> scCases[] = {
-        // variable in buffer memory
         {SC_BUFFER, "buffer"},
-        // variable in image memory
         {SC_IMAGE, "image"},
-        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
     static const NamedValue<bool> localCases[] = {
-        // variable in non-local memory
         {false, "nonlocal"},
-        // variable in local memory
         {true, "local"},
     };
 
     static const NamedValue<SyncType> syncCases[] = {
-        // release fence, acquire fence
         {ST_FENCE_FENCE, "fence_fence"},
-        // release fence, atomic acquire
         {ST_FENCE_ATOMIC, "fence_atomic"},
-        // atomic release, acquire fence
         {ST_ATOMIC_FENCE, "atomic_fence"},
-        // atomic release, atomic acquire
         {ST_ATOMIC_ATOMIC, "atomic_atomic"},
     };
 
     static const NamedValue<bool> cohCases[] = {
-        // coherent payload variable
         {true, "coherent"},
-        // noncoherent payload variable
         {false, "noncoherent"},
     };
 
-    static const NamedValue<bool> transVisCases[] = {
-        // destination invocation acquires
-        {false, "nontransvis"},
-        // invocation 0,0 acquires
-        {true, "transvis"},
-    };
-
-    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "transitive"));
-
     const auto groupName = [](const char *prefix, const char *name) { return std::string(prefix) + "_" + name; };
 
-    for (const auto &[local0, sc0, local1, sc1, sync, coh, vis] :
-         Combinations(localCases, scCases, localCases, scCases, syncCases, cohCases, transVisCases))
+    for (const auto &[local0, sc0, local1, sc1, sync, coh] :
+         Combinations(localCases, scCases, localCases, scCases, syncCases, cohCases))
     {
-        CaseDef c = {
+        const CaseDef c = {
             local0.value, // bool payloadMemLocal;
             local1.value, // bool guardMemLocal;
             coh.value,    // bool coherent;
-            vis.value,    // bool transitiveVis;
             sc0.value,    // StorageClass payloadSC;
             sc1.value,    // StorageClass guardSC;
             sync.value,   // SyncType syncType;
         };
-        addTestCase(*group,
+
+        addTestCase(root,
                     {coh.name, sync.name, groupName("payload", local0.name), sc0.name, groupName("guard", local1.name),
                      sc1.name},
-                    new ChainsWithBarrierTestCase(testCtx, vis.name, c));
+                    new VariantTestCase(root.getTestContext(), variantName, c));
     }
+}
+
+} // namespace
+
+tcu::TestCaseGroup *createChainsWithBarrierTests(tcu::TestContext &testCtx)
+{
+    de::MovePtr<tcu::TestCaseGroup> group(new tcu::TestCaseGroup(testCtx, "transitive"));
+
+    addChainsWithBarrierTests<AvailabilityChainsTestCase>(*group, "nontransvis");
+    addChainsWithBarrierTests<AvailabilityVisibilityChainsTestCase>(*group, "transvis");
 
     return group.release();
 }

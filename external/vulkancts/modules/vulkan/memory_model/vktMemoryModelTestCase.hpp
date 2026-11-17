@@ -189,7 +189,7 @@ protected:
     void checkSupportSubgroupFeatures(const Context &context, uint32_t minSize = 2) const;
     void checkSupportSplitBarriers(const Context &context) const;
 
-    // Helper function to initialize coordinates of partner invocations
+    // Helper functions to initialize partner and variable coordinates
     std::string initPartnerCoordinates(Scope scope, const char *suffix = "") const;
     std::string initMultiPartnerCoordinates(Scope scope, uint32_t numPartners) const;
     std::string initVarCoordinates(const char *pos, const char *suffix) const;
@@ -222,6 +222,7 @@ protected:
     uint32_t getVarSemantics(const char *name) const;
 
 private:
+    std::string declareVars() const;
     std::string initPartners(Scope scope, uint32_t numPartners, bool isIndexRotation, const char *suffix) const;
     bool hasStorageClass(StorageClass sc) const;
     bool hasDataType(DataType type) const;

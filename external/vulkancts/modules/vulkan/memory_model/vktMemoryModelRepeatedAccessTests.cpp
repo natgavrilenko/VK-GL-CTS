@@ -85,9 +85,7 @@ void RepeatedAccessTestCase::checkSupport(Context &context) const
         TCU_THROW(NotSupportedError, "vulkanMemoryModel not supported");
 
     if (m_data.farScope == SCOPE_DEVICE && !context.getVulkanMemoryModelFeatures().vulkanMemoryModelDeviceScope)
-    {
         TCU_THROW(NotSupportedError, "vulkanMemoryModelDeviceScope not supported");
-    }
 
     if (m_data.nearScope == SCOPE_SUBGROUP)
         checkSupportSubgroupFeatures(context);
@@ -101,8 +99,8 @@ void RepeatedAccessTestCase::checkSupport(Context &context) const
 std::string RepeatedAccessTestCase::declareSpvIntrinsics() const
 {
     std::ostringstream css;
-    css << "#extension GL_EXT_spirv_intrinsics : enable\n"
-        << declareVarSpvIntrinsics("payload", m_data.farScope == SCOPE_DEVICE);
+    css << "#extension GL_EXT_spirv_intrinsics : enable\n";
+    css << declareVarSpvIntrinsics("payload", m_data.farScope == SCOPE_DEVICE);
     return css.str();
 }
 
@@ -118,7 +116,8 @@ private:
 
 std::string ShadowedStoreIncTestCase::initProgram() const
 {
-    const char *typeStr       = gl_type(getVar("payload").type);
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
     const Scope nearScope     = m_data.nearScope;
     const Scope farScope      = m_data.farScope;
     const uint32_t semPayload = getVarSemantics("payload");
@@ -135,6 +134,7 @@ std::string ShadowedStoreIncTestCase::initProgram() const
         << "   uint value = invocationId;\n"
         << "   " << typeStr << " r = 0;\n"
         << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartnerFar);\n"
+        << "   value += " << gl_toUint(type, spv_load("payload", "payloadCoordPartnerFar")) << " >> 31;\n"
         << "   " << spv_store("payload", "payloadCoordPartnerNear", "value", nearScope) << ";\n"
         << "   " << gl_atomicStore("guard1", "guard1CoordPartnerNear", "1u", nearScope, semRel) << ";\n"
         << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", nearScope, semAcq) << " == 0;\n"
@@ -163,7 +163,8 @@ private:
 
 std::string ShadowedStoreDecTestCase::initProgram() const
 {
-    const char *typeStr       = gl_type(getVar("payload").type);
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
     const Scope nearScope     = m_data.nearScope;
     const Scope farScope      = m_data.farScope;
     const uint32_t semPayload = getVarSemantics("payload");
@@ -180,6 +181,7 @@ std::string ShadowedStoreDecTestCase::initProgram() const
         << "   uint value = invocationId;\n"
         << "   " << typeStr << " r = 0;\n"
         << "   " << typeStr << " expected = " << typeStr << "(invocationIdPartnerNear);\n"
+        << "   value += " << gl_toUint(type, spv_load("payload", "payloadCoordPartnerNear")) << " >> 31;\n"
         << "   " << spv_store("payload", "payloadCoordPartnerFar", "value", farScope) << ";\n"
         << "   " << gl_atomicStore("guard1", "guard1CoordPartnerFar", "1u", farScope, semRel) << ";\n"
         << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", farScope, semAcq) << " == 0;\n"
@@ -208,7 +210,8 @@ private:
 
 std::string ObservedLoadTestCase::initProgram() const
 {
-    const char *typeStr       = gl_type(getVar("payload").type);
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
     const Scope nearScope     = m_data.nearScope;
     const Scope farScope      = m_data.farScope;
     const uint32_t semPayload = getVarSemantics("payload");
@@ -227,6 +230,7 @@ std::string ObservedLoadTestCase::initProgram() const
         << "   " << typeStr << " r2 = 0;\n"
         << "   " << typeStr << " expected1 = " << typeStr << "(invocationId);\n"
         << "   " << typeStr << " expected2 = " << typeStr << "(invocationIdPartnerNear);\n"
+        << "   value += " << gl_toUint(type, spv_load("payload", "payloadCoordPartnerNear")) << " >> 31;\n"
         << "   " << spv_store("payload", "payloadCoordPartnerFar", "value", farScope) << ";\n"
         << "   " << gl_atomicStore("guard1", "guard1CoordPartnerFar", "1u", farScope, semRel) << ";\n"
         << "   skip1 = " << gl_atomicLoad("guard1", "guard1Coord", farScope, semAcq) << " == 0;\n"
@@ -247,38 +251,27 @@ template <typename VariantTestCase>
 void addRepeatedAccessTests(tcu::TestCaseGroup &root, const char *variantName)
 {
     static const NamedValue<StorageClass> scCases[] = {
-        // variable in buffer memory
         {SC_BUFFER, "buffer"},
-        // variable in workgroup memory
+        {SC_IMAGE, "image"},
         {SC_WORKGROUP, "workgroup"},
-        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
     static const NamedValue<bool> localCases[] = {
-        // variable in non-local memory
         {false, "nonlocal"},
-        // variable in local memory
         {true, "local"},
     };
 
     static const NamedValue<Scope> scopeCases[] = {
-        // device scope
         {SCOPE_DEVICE, "device"},
-        // queue family scope
         {SCOPE_QUEUEFAMILY, "queuefamily"},
-        // workgroup scope
         {SCOPE_WORKGROUP, "workgroup"},
-        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
     static const NamedValue<Stage> stageCases[] = {
-        // compute stage
         {STAGE_COMPUTE, "comp"},
-        // vertex stage
         {STAGE_VERTEX, "vert"},
-        // fragment stage
         {STAGE_FRAGMENT, "frag"},
     };
 
@@ -305,8 +298,7 @@ void addRepeatedAccessTests(tcu::TestCaseGroup &root, const char *variantName)
             continue;
         }
 
-        // Skip tests where a variable is in workgroup memory, but its accesses have larger scopes.
-        // Payload is shared at both scopes, each guard at the scope of its step.
+        // Skip tests where a variable is in workgroup memory, but its accesses cross larger scopes
         const Scope guard1Scope = VariantTestCase::nearFirst ? c.nearScope : c.farScope;
         const Scope guard2Scope = VariantTestCase::nearFirst ? c.farScope : c.nearScope;
         if ((c.payloadSC == SC_WORKGROUP && c.farScope > SCOPE_WORKGROUP) ||
@@ -323,15 +315,21 @@ void addRepeatedAccessTests(tcu::TestCaseGroup &root, const char *variantName)
             continue;
         }
 
-        // Workgroup scope requires compute stage
+        // Skip workgroup scope for non-compute stages
         if (c.stage != STAGE_COMPUTE && (c.nearScope == SCOPE_WORKGROUP || c.farScope == SCOPE_WORKGROUP))
         {
             continue;
         }
 
-        // Workgroup storage class requires compute stage
+        // Skip workgroup storage class for non-compute stages
         if (c.stage != STAGE_COMPUTE &&
             (c.payloadSC == SC_WORKGROUP || c.guard1SC == SC_WORKGROUP || c.guard2SC == SC_WORKGROUP))
+        {
+            continue;
+        }
+
+        // Payload is accessed with SPIR-V intrinsic, which doesn't support formatted images
+        if (c.payloadSC == SC_IMAGE)
         {
             continue;
         }

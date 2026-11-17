@@ -44,7 +44,7 @@ namespace
 enum TestType
 {
     TT_MP = 0, // message passing
-    TT_WAR,    // write-after-read hazard
+    TT_WAR,    // write-after-read
 };
 
 enum SyncType
@@ -82,16 +82,10 @@ bool hasGuard(const CaseDef &data)
            data.syncType == ST_ATOMIC_ATOMIC || data.syncType == ST_ATOMIC_RMW;
 }
 
-bool isSplitBarrier(SyncType syncType)
-{
-    return syncType == ST_SPLIT_CONTROL_BARRIER || syncType == ST_SPLIT_CONTROL_AND_MEMORY_BARRIER ||
-           syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER;
-}
-
 Scope getMappingScope(const CaseDef &data)
 {
     const bool hasSharedVar = data.payloadSC == SC_WORKGROUP || (hasGuard(data) && data.guardSC == SC_WORKGROUP);
-    if ((data.scope == SCOPE_DEVICE || data.scope == SCOPE_QUEUEFAMILY) && hasSharedVar)
+    if (hasSharedVar && data.scope > SCOPE_WORKGROUP)
     {
         return SCOPE_WORKGROUP;
     }
@@ -113,7 +107,7 @@ std::vector<VarDef> createVars(const CaseDef &data)
     std::vector<VarDef> vars{{"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal}};
     if (hasGuard(data))
     {
-        const MemQualifier guardQualifier = data.guardSC == SC_IMAGE ? payloadQualifier : MEM_NONE;
+        const MemQualifier guardQualifier = (data.core11 && data.guardSC == SC_IMAGE) ? MEM_COHERENT : MEM_NONE;
         vars.push_back({"guard", guardQualifier, data.guardSC, data.dataType, data.guardMemLocal});
     }
     vars.push_back({"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true});
@@ -151,7 +145,8 @@ void MessagePassingTestCase::checkSupport(Context &context) const
             TCU_THROW(NotSupportedError, "vulkanMemoryModelDeviceScope not supported");
     }
 
-    if (isSplitBarrier(m_data.syncType))
+    if (m_data.syncType == ST_SPLIT_CONTROL_BARRIER || m_data.syncType == ST_SPLIT_CONTROL_AND_MEMORY_BARRIER ||
+        m_data.syncType == ST_SPLIT_CONTROL_BARRIER_AND_BARRIER)
         checkSupportSplitBarriers(context);
 
     if (m_data.scope == SCOPE_SUBGROUP)
@@ -165,6 +160,9 @@ void MessagePassingTestCase::checkSupport(Context &context) const
 
 std::string MessagePassingTestCase::initProgram() const
 {
+    const DataType type       = getVar("payload").type;
+    const char *typeStr       = gl_type(type);
+    const Scope scope         = m_data.scope;
     const uint32_t semAv      = (m_data.testType == TT_WAR || m_data.coherent) ? 0u : uint32_t(SEM_AVAILABLE);
     const uint32_t semVis     = (m_data.testType == TT_WAR || m_data.coherent) ? 0u : uint32_t(SEM_VISIBLE);
     const uint32_t semPayload = getVarSemantics("payload");
@@ -172,10 +170,7 @@ std::string MessagePassingTestCase::initProgram() const
     const uint32_t semRel     = SEM_RELEASE | semPayload | semAv;
     const uint32_t semAcq     = SEM_ACQUIRE | semPayload | semVis;
     const uint32_t semAcqRel  = SEM_ACQUIRE_RELEASE | semPayload | semAv | semVis;
-    const Scope scope         = m_data.scope;
 
-    const DataType type        = getVar("payload").type;
-    const char *typeStr        = gl_type(type);
     const std::string expected = (m_data.testType == TT_MP) ? (std::string{typeStr} + "(invocationIdPartner)") : "0";
 
     std::ostringstream css;
@@ -188,15 +183,10 @@ std::string MessagePassingTestCase::initProgram() const
         << "   " << typeStr << " expected = " << expected << ";\n";
 
     if (m_data.testType == TT_MP)
-    {
-        // Prefetch the partner's payload; this adds 0 because every stored value is below 2^31
         css << "   value += " << gl_toUint(type, gl_load("payload", "payloadCoordPartner")) << " >> 31;\n"
             << "   " << gl_store("payload", "payloadCoord", "value") << ";\n";
-    }
     else
-    {
         css << "   r = " << gl_load("payload", "payloadCoordPartner") << ";\n";
-    }
 
     switch (m_data.syncType)
     {
@@ -268,95 +258,62 @@ std::string MessagePassingTestCase::initProgram() const
 tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName, TestType testType)
 {
     static const NamedValue<bool> core11Cases[] = {
-        // supported by Vulkan1.1
-        {true, "core11"},
-        // requires VK_KHR_vulkan_memory_model extension
-        {false, "ext"},
+        {true, "core11"}, // supported by Vulkan 1.1
+        {false, "ext"},   // requires Vulkan memory model
     };
 
     static const NamedValue<DataType> typeCases[] = {
-        // uint32_t atomics
         {DATA_TYPE_UINT, "u32"},
-        // uint64_t atomics
         {DATA_TYPE_UINT64, "u64"},
-        // float32 atomics
         {DATA_TYPE_FLOAT32, "f32"},
-        // float64 atomics
         {DATA_TYPE_FLOAT64, "f64"},
     };
 
     static const NamedValue<StorageClass> scCases[] = {
-        // variable in buffer memory
         {SC_BUFFER, "buffer"},
-        // variable in image memory
         {SC_IMAGE, "image"},
-        // variable in workgroup memory
         {SC_WORKGROUP, "workgroup"},
-        // variable in physical storage buffer memory
         {SC_PHYSBUFFER, "physbuffer"},
     };
 
     static const NamedValue<bool> localCases[] = {
-        // variable in non-local memory
         {false, "nonlocal"},
-        // variable in local memory
         {true, "local"},
     };
 
     static const NamedValue<SyncType> syncCases[] = {
-        // release fence, acquire fence
         {ST_FENCE_FENCE, "fence_fence"},
-        // release fence, atomic acquire
         {ST_FENCE_ATOMIC, "fence_atomic"},
-        // atomic release, acquire fence
         {ST_ATOMIC_FENCE, "atomic_fence"},
-        // atomic release, atomic acquire
         {ST_ATOMIC_ATOMIC, "atomic_atomic"},
-        // control barrier
         {ST_CONTROL_BARRIER, "control_barrier"},
-        // control barrier with separate memory barriers
         {ST_CONTROL_AND_MEMORY_BARRIER, "control_and_memory_barrier"},
-        // split control barrier with release/acquire
         {ST_SPLIT_CONTROL_BARRIER, "split_control_barrier"},
-        // split control barrier with separate memory barriers
         {ST_SPLIT_CONTROL_AND_MEMORY_BARRIER, "split_control_and_memory_barrier"},
-        // split control barrier with barrier
         {ST_SPLIT_CONTROL_BARRIER_AND_BARRIER, "split_control_barrier_and_barrier"},
     };
 
-    // Atomic RMW variants exist only for atomic release and acquire (ST_ATOMIC_ATOMIC),
-    // where they replace the atomic store and load with exchanges (ST_ATOMIC_RMW)
+    // A separate case list to preserve original test names
     static const NamedValue<bool> rmwCases[] = {
-        // atomic store or atomic load
-        {false, "atomicwrite"},
-        // atomic read-modify-write
-        {true, "atomicrmw"},
+        {false, "atomicwrite"}, // syncCase from syncCases
+        {true, "atomicrmw"},    // syncCase is ST_ATOMIC_RMW
     };
 
     static const NamedValue<Scope> scopeCases[] = {
-        // device scope
         {SCOPE_DEVICE, "device"},
-        // queue family scope
         {SCOPE_QUEUEFAMILY, "queuefamily"},
-        // workgroup scope
         {SCOPE_WORKGROUP, "workgroup"},
-        // subgroup scope
         {SCOPE_SUBGROUP, "subgroup"},
     };
 
     static const NamedValue<bool> cohCases[] = {
-        // coherent variable
         {true, "coherent"},
-        // noncoherent variable
         {false, "noncoherent"},
     };
 
     static const NamedValue<Stage> stageCases[] = {
-        // compute stage
         {STAGE_COMPUTE, "comp"},
-        // vertex stage
         {STAGE_VERTEX, "vert"},
-        // fragment stage
         {STAGE_FRAGMENT, "frag"},
     };
 
@@ -370,7 +327,7 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
     {
         const SyncType syncType = rmw.value ? ST_ATOMIC_RMW : sync.value;
 
-        CaseDef c = {
+        const CaseDef c = {
             core11.value, // bool core11;
             local0.value, // bool payloadMemLocal;
             local1.value, // bool guardMemLocal;
@@ -384,10 +341,10 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
             stage.value,  // Stage stage;
         };
 
-        // Mustpass11 tests should only exercise variations that are expected to work without Vulkan memory model.
-        // Exclude noncoherent tests, 64-bit data types, and release-acquire atomics. Exclude queue family scope which
-        // doesn't exist in Vulkan 1.1. Exclude physical storage buffer which doesn't support coherent decoration.
-        if (c.core11 && (c.coherent == 0 || c.syncType == ST_FENCE_ATOMIC || c.syncType == ST_ATOMIC_FENCE ||
+        // Tests in core11 include only variations that do not require Vulkan memory model. Skip noncoherent tests,
+        // 64-bit data types, and release-acquire atomics. Skip queue family scope which doesn't exist in Vulkan 1.1.
+        // Skip physical storage buffer which doesn't support coherent decoration.
+        if (c.core11 && (!c.coherent || c.syncType == ST_FENCE_ATOMIC || c.syncType == ST_ATOMIC_FENCE ||
                          c.syncType == ST_ATOMIC_ATOMIC || c.syncType == ST_ATOMIC_RMW ||
                          c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64 ||
                          c.scope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER || c.guardSC == SC_PHYSBUFFER))
@@ -395,19 +352,20 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
             continue;
         }
 
+        // Workgroup memory is only tested as non-local
+        if ((c.payloadMemLocal && c.payloadSC == SC_WORKGROUP) || (c.guardMemLocal && c.guardSC == SC_WORKGROUP))
+        {
+            continue;
+        }
+
+        // Skip workgroup scope for non-compute stages
         if (c.stage != STAGE_COMPUTE && c.scope == SCOPE_WORKGROUP)
         {
             continue;
         }
 
-        // Don't exercise local and non-local for workgroup memory
-        // Also don't exercise workgroup memory for non-compute stages
-        if (c.payloadSC == SC_WORKGROUP && (c.payloadMemLocal != 0 || c.stage != STAGE_COMPUTE))
-        {
-            continue;
-        }
-
-        if (c.guardSC == SC_WORKGROUP && (c.guardMemLocal != 0 || c.stage != STAGE_COMPUTE))
+        // Skip workgroup storage class for non-compute stages
+        if (c.stage != STAGE_COMPUTE && (c.payloadSC == SC_WORKGROUP || c.guardSC == SC_WORKGROUP))
         {
             continue;
         }
@@ -423,11 +381,9 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
             continue;
         }
 
-        // uint64/float32/float64 testing is primarily for atomics
-        // so only test it for ST_ATOMIC_ATOMIC and ST_ATOMIC_RMW
-        const bool atomicTesting =
-            (c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT32 || c.dataType == DATA_TYPE_FLOAT64);
-        if (atomicTesting && c.syncType != ST_ATOMIC_ATOMIC && c.syncType != ST_ATOMIC_RMW)
+        // Limit uint64/float32/float64 data types to ST_ATOMIC_ATOMIC and ST_ATOMIC_RMW tests
+        if (c.syncType != ST_ATOMIC_ATOMIC && c.syncType != ST_ATOMIC_RMW &&
+            (is64BitType(c.dataType) || !isIntType(c.dataType)))
         {
             continue;
         }
@@ -443,13 +399,14 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
         {
             continue;
         }
-        // Barrier tests have no guard, so only run them when c.guardSC and c.guardMemLocal are zero
-        if (!hasGuard(c) && (c.guardSC != 0 || c.guardMemLocal != 0))
+
+        // Barrier tests have no guard, so run them only for one guard variation
+        if (!hasGuard(c) && (c.guardSC > 0 || c.guardMemLocal))
         {
             continue;
         }
 
-        // Atomic RMW is only tested with atomic release and acquire
+        // Execute RMW tests only if syncType is atomic (workaround to preserve old test names)
         if (rmw.value && sync.value != ST_ATOMIC_ATOMIC)
         {
             continue;
