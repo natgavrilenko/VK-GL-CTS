@@ -328,7 +328,7 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
     {
         const SyncType syncType = rmw.value ? ST_ATOMIC_RMW : sync.value;
 
-        // To keep the semantics of old tests, u64 tests with one variable in image memory use u32 for this variable.
+        // To keep the requirements of old tests, u64 tests with one variable in image memory use u32 for this variable.
         // New u64 tests with both variables in image memory use 64-bit images.
         const bool isUint64OneImage =
             type.value == DATA_TYPE_UINT64 && (sc0.value == SC_IMAGE) != (sc1.value == SC_IMAGE);
