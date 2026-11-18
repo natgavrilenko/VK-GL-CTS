@@ -204,11 +204,8 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
     };
 
     static const NamedValue<std::optional<Scope>> visScopeCases[] = {
-        {std::nullopt, "nonprivate"},
-        {SCOPE_SUBGROUP, "vissubgroup"},
-        {SCOPE_WORKGROUP, "visworkgroup"},
-        {SCOPE_QUEUEFAMILY, "visqueuefamily"},
-        {SCOPE_DEVICE, "visdevice"},
+        {std::nullopt, "nonprivate"},          {SCOPE_SUBGROUP, "vissubgroup"}, {SCOPE_WORKGROUP, "visworkgroup"},
+        {SCOPE_QUEUEFAMILY, "visqueuefamily"}, {SCOPE_DEVICE, "visdevice"},
     };
 
     static const NamedValue<Stage> stageCases[] = {
