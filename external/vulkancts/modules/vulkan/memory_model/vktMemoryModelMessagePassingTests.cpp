@@ -68,7 +68,8 @@ struct CaseDef
     bool guardMemLocal;
     bool coherent;
     TestType testType;
-    DataType dataType;
+    DataType payloadType;
+    DataType guardType;
     StorageClass payloadSC;
     StorageClass guardSC;
     SyncType syncType;
@@ -104,11 +105,11 @@ MemQualifier getMemQualifier(const CaseDef &data)
 std::vector<VarDef> createVars(const CaseDef &data)
 {
     const MemQualifier payloadQualifier = getMemQualifier(data);
-    std::vector<VarDef> vars{{"payload", payloadQualifier, data.payloadSC, data.dataType, data.payloadMemLocal}};
+    std::vector<VarDef> vars{{"payload", payloadQualifier, data.payloadSC, data.payloadType, data.payloadMemLocal}};
     if (hasGuard(data))
     {
         const MemQualifier guardQualifier = (data.core11 && data.guardSC == SC_IMAGE) ? MEM_COHERENT : MEM_NONE;
-        vars.push_back({"guard", guardQualifier, data.guardSC, data.dataType, data.guardMemLocal});
+        vars.push_back({"guard", guardQualifier, data.guardSC, data.guardType, data.guardMemLocal});
     }
     vars.push_back({"fail", MEM_NONE, SC_BUFFER, DATA_TYPE_UINT, true});
     return vars;
@@ -327,13 +328,21 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
     {
         const SyncType syncType = rmw.value ? ST_ATOMIC_RMW : sync.value;
 
+        // To keep the semantics of old tests, u64 tests with one variable in image memory use u32 for this variable.
+        // New u64 tests with both variables in image memory use 64-bit images.
+        const bool isUint64OneImage =
+            type.value == DATA_TYPE_UINT64 && (sc0.value == SC_IMAGE) != (sc1.value == SC_IMAGE);
+        const DataType payloadType = (isUint64OneImage && sc0.value == SC_IMAGE) ? DATA_TYPE_UINT : type.value;
+        const DataType guardType   = (isUint64OneImage && sc1.value == SC_IMAGE) ? DATA_TYPE_UINT : type.value;
+
         const CaseDef c = {
             core11.value, // bool core11;
             local0.value, // bool payloadMemLocal;
             local1.value, // bool guardMemLocal;
             coh.value,    // bool coherent;
             testType,     // TestType testType;
-            type.value,   // DataType dataType;
+            payloadType,  // DataType payloadType;
+            guardType,    // DataType guardType;
             sc0.value,    // StorageClass payloadSC;
             sc1.value,    // StorageClass guardSC;
             syncType,     // SyncType syncType;
@@ -346,7 +355,7 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
         // Skip physical storage buffer which doesn't support coherent decoration.
         if (c.core11 && (!c.coherent || c.syncType == ST_FENCE_ATOMIC || c.syncType == ST_ATOMIC_FENCE ||
                          c.syncType == ST_ATOMIC_ATOMIC || c.syncType == ST_ATOMIC_RMW ||
-                         c.dataType == DATA_TYPE_UINT64 || c.dataType == DATA_TYPE_FLOAT64 ||
+                         type.value == DATA_TYPE_UINT64 || type.value == DATA_TYPE_FLOAT64 ||
                          c.scope == SCOPE_QUEUEFAMILY || c.payloadSC == SC_PHYSBUFFER || c.guardSC == SC_PHYSBUFFER))
         {
             continue;
@@ -383,19 +392,13 @@ tcu::TestCaseGroup *addTests(tcu::TestContext &testCtx, const char *variantName,
 
         // Limit uint64/float32/float64 data types to ST_ATOMIC_ATOMIC and ST_ATOMIC_RMW tests
         if (c.syncType != ST_ATOMIC_ATOMIC && c.syncType != ST_ATOMIC_RMW &&
-            (is64BitType(c.dataType) || !isIntType(c.dataType)))
+            (is64BitType(type.value) || !isIntType(type.value)))
         {
             continue;
         }
 
-        // No 64-bit image types, so skip tests with both payload and guard in image memory
-        if (c.dataType == DATA_TYPE_UINT64 && c.payloadSC == SC_IMAGE && c.guardSC == SC_IMAGE)
-        {
-            continue;
-        }
-
-        // No support for atomic operations on 64-bit floating point images
-        if (c.dataType == DATA_TYPE_FLOAT64 && (c.payloadSC == SC_IMAGE || c.guardSC == SC_IMAGE))
+        // Vulkan has no 64-bit floating point images
+        if (type.value == DATA_TYPE_FLOAT64 && (c.payloadSC == SC_IMAGE || c.guardSC == SC_IMAGE))
         {
             continue;
         }

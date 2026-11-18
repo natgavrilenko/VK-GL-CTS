@@ -261,8 +261,8 @@ tcu::TestCaseGroup *createMixedAccessTests(tcu::TestContext &testCtx)
             continue;
         }
 
-        // No 64-bit image types, so skip tests with payload in image memory
-        if (c.payloadSC == SC_IMAGE && is64BitType(c.dataType))
+        // Vulkan has no 64-bit floating point images
+        if (c.payloadSC == SC_IMAGE && c.dataType == DATA_TYPE_FLOAT64)
         {
             continue;
         }

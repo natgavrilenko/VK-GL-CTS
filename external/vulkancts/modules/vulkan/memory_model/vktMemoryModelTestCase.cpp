@@ -130,6 +130,38 @@ const char *gl_qualifier(const MemQualifier qual)
     }
 }
 
+const char *gl_imageFormat(const DataType type)
+{
+    switch (type)
+    {
+    case DATA_TYPE_UINT:
+        return "r32ui";
+    case DATA_TYPE_UINT64:
+        return "r64ui";
+    case DATA_TYPE_FLOAT32:
+        return "r32f";
+    default:
+        DE_ASSERT(0);
+        return "";
+    }
+}
+
+const char *gl_imageType(const DataType type)
+{
+    switch (type)
+    {
+    case DATA_TYPE_UINT:
+        return "uimage2D";
+    case DATA_TYPE_UINT64:
+        return "u64image2D";
+    case DATA_TYPE_FLOAT32:
+        return "image2D";
+    default:
+        DE_ASSERT(0);
+        return "";
+    }
+}
+
 glu::ShaderType getShaderType(const Stage stage)
 {
     switch (stage)
@@ -178,6 +210,22 @@ VkPipelineStageFlagBits getPipelineStageFlag(const Stage stage)
     }
 }
 
+VkFormat getImageFormat(const DataType type)
+{
+    switch (type)
+    {
+    case DATA_TYPE_UINT:
+        return VK_FORMAT_R32_UINT;
+    case DATA_TYPE_UINT64:
+        return VK_FORMAT_R64_UINT;
+    case DATA_TYPE_FLOAT32:
+        return VK_FORMAT_R32_SFLOAT;
+    default:
+        DE_ASSERT(0);
+        return VK_FORMAT_UNDEFINED;
+    }
+}
+
 MemoryRequirement getVarMemoryRequirement(const VarDef &var, bool isDeviceAddressSupported)
 {
     const bool deviceAddress = isDeviceAddressSupported && var.sc == SC_PHYSBUFFER;
@@ -201,7 +249,8 @@ void MemoryModelTestCase::initPrograms(SourceCollections &programCollection) con
            "#extension GL_KHR_shader_subgroup_ballot : enable\n"
            "#extension GL_KHR_memory_scope_semantics : enable\n"
            "#extension GL_ARB_gpu_shader_int64 : enable\n"
-           "#extension GL_EXT_buffer_reference : enable\n";
+           "#extension GL_EXT_buffer_reference : enable\n"
+           "#extension GL_EXT_shader_image_int64 : enable\n";
 
     // Can be overridden by a child class, empty by default
     css << declareSpvIntrinsics();
@@ -322,10 +371,8 @@ std::string MemoryModelTestCase::declareVars() const
         }
         case SC_IMAGE:
         {
-            const char *type1 = isIntType(var.type) ? "r32ui" : "r32f";
-            const char *type2 = isIntType(var.type) ? "uimage2D" : "image2D";
-            css << "layout(set=0, binding=" << i << ", " << type1 << ") uniform " << gl_qualifier(var.qual) << " "
-                << type2 << " " << name << ";\n";
+            css << "layout(set=0, binding=" << i << ", " << gl_imageFormat(var.type) << ") uniform "
+                << gl_qualifier(var.qual) << " " << gl_imageType(var.type) << " " << name << ";\n";
             break;
         }
         case SC_WORKGROUP:
@@ -539,6 +586,21 @@ void MemoryModelTestCase::checkSupportVars(const Context &context) const
         // Vulkan has no 64-bit floating point images, so the tests must not create them
         DE_ASSERT(var.sc != SC_IMAGE || var.type != DATA_TYPE_FLOAT64);
 
+        if (var.sc == SC_IMAGE && var.type == DATA_TYPE_UINT64)
+        {
+            // A 64-bit integer image needs the Int64ImageEXT capability, also without atomics
+            if (!context.getShaderImageAtomicInt64FeaturesEXT().shaderImageInt64Atomics)
+                TCU_THROW(NotSupportedError, "64-bit integer images not supported");
+
+            const VkFormatFeatureFlags requiredFeatures =
+                VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT |
+                VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+            const VkFormatProperties formatProperties =
+                getPhysicalDeviceFormatProperties(vki, physDevice, VK_FORMAT_R64_UINT);
+            if ((formatProperties.optimalTilingFeatures & requiredFeatures) != requiredFeatures)
+                TCU_THROW(NotSupportedError, "VK_FORMAT_R64_UINT does not support the required format features");
+        }
+
         if (var.sc != SC_BUFFER && var.sc != SC_PHYSBUFFER)
             continue;
 
@@ -558,6 +620,7 @@ void MemoryModelTestCase::checkSupportVarAtomics(const Context &context, const c
         if ((var.sc == SC_BUFFER || var.sc == SC_PHYSBUFFER) &&
             !context.getShaderAtomicInt64Features().shaderBufferInt64Atomics)
             TCU_THROW(NotSupportedError, "64-bit integer buffer atomics not supported");
+        // SC_IMAGE is checked in checkSupportVars
         if (var.sc == SC_WORKGROUP && !context.getShaderAtomicInt64Features().shaderSharedInt64Atomics)
             TCU_THROW(NotSupportedError, "64-bit integer shared atomics not supported");
         break;
@@ -580,7 +643,7 @@ void MemoryModelTestCase::checkSupportVarAtomics(const Context &context, const c
         if ((var.sc == SC_BUFFER || var.sc == SC_PHYSBUFFER) &&
             !context.getShaderAtomicFloatFeaturesEXT().shaderBufferFloat64Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat64: 64-bit floating point buffer atomics not supported");
-        // DATA_TYPE_FLOAT64 with SC_IMAGE is rejected in checkSupportVars
+        // SC_IMAGE is rejected in checkSupportVars
         if (var.sc == SC_WORKGROUP && !context.getShaderAtomicFloatFeaturesEXT().shaderSharedFloat64Atomics)
             TCU_THROW(NotSupportedError, "VkShaderAtomicFloat64: 64-bit floating point shared atomics not supported");
         break;
@@ -682,8 +745,7 @@ std::string MemoryModelTestCase::gl_atomicStore(const char *name, const char *id
                                                 const uint32_t sem) const
 {
     const VarDef &var   = getVar(name);
-    const bool noCast   = is64BitType(var.type) && var.sc == SC_IMAGE;
-    const char *typeStr = noCast ? "" : gl_type(var.type);
+    const char *typeStr = gl_type(var.type);
 
     std::ostringstream css;
     if (var.sc == SC_IMAGE)
@@ -699,8 +761,7 @@ std::string MemoryModelTestCase::gl_atomicExchange(const char *name, const char 
                                                    const Scope scope, const uint32_t sem) const
 {
     const VarDef &var   = getVar(name);
-    const bool noCast   = is64BitType(var.type) && var.sc == SC_IMAGE;
-    const char *typeStr = noCast ? "" : gl_type(var.type);
+    const char *typeStr = gl_type(var.type);
 
     std::ostringstream css;
     if (var.sc == SC_IMAGE)
@@ -729,6 +790,8 @@ std::string MemoryModelTestCase::gl_store(const char *name, const char *idx, con
     std::ostringstream css;
     if (var.sc != SC_IMAGE)
         css << var.name << ".x[" << idx << "] = " << gl_type(var.type) << "(" << value << ")";
+    else if (var.type == DATA_TYPE_UINT64)
+        css << "imageStore(" << var.name << ", " << idx << ", u64vec4(uint64_t(" << value << "), 0, 0, 0))";
     else if (isIntType(var.type))
         css << "imageStore(" << var.name << ", " << idx << ", uvec4(" << value << ", 0, 0, 0))";
     else
@@ -943,7 +1006,7 @@ tcu::TestStatus MemoryModelTestInstance::queuePass(const vkt::QueueData &queueDa
         }
         case SC_IMAGE:
         {
-            const VkFormat imageFormat     = isIntType(var.type) ? VK_FORMAT_R32_UINT : VK_FORMAT_R32_SFLOAT;
+            const VkFormat imageFormat     = getImageFormat(var.type);
             const MemoryRequirement memReq = var.local ? MemoryRequirement::Local : MemoryRequirement::NonLocal;
 
             VkImageCreateInfo imageCreateInfo = initVulkanStructure();
