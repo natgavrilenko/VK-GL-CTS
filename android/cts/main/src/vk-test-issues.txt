@@ -38,3 +38,7 @@ dEQP-VK.image.extended_usage_bit_compatibility.image_format_list.*
 
 # Issue 6828
 dEQP-VK.spirv_assembly.instruction.compute.ptr_access_chain.workgroup_bad_stride
+
+# Issue 7304 (pending acceptance of Vulkan memory model updates)
+dEQP-VK.memory_model.mixed_access.*
+dEQP-VK.memory_model.repeated_access.*
